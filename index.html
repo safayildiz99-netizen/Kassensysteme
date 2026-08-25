@@ -156,7 +156,7 @@
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
     <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
-    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: ONLINE-FIX-20-35</div>
+    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: PRODUKTE-FIX-20-36</div>
     <div class="register-actions">
       <button class="btn" onclick="openCompanyRegistration()">＋ Firmenkonto eröffnen</button>
       <button class="btn" onclick="openEmployeeRegistration()">＋ Mitarbeiterkonto selbst erstellen</button>
@@ -384,6 +384,62 @@ const seedCoupons=[
  {code:'5630 1147',type:'fixed',value:5,label:'5 € Rabatt',min:20,active:true}
 ];
 let state={store:'Star Markt',storeType:'Alle',products:[],cart:[],receipts:[],sales:0,tx:0,coupons:[],activeCoupon:null,category:'Alle',activityLog:[]};
+
+const STATE_KEY='kassenspiel-online-state-products-v3';
+
+function restoreBuiltInImages(){
+  const byBarcode=new Map(baseProducts.map(p=>[String(p.barcode),p]));
+  state.products=(state.products||[]).map(p=>{
+    const original=byBarcode.get(String(p.barcode));
+    if(original && !p.image) p.image=original.image;
+    return normalizeWeightedProduct(p);
+  });
+}
+
+function seedExampleProducts(){
+  // Die echten Beispielartikel zuerst übernehmen.
+  if(!Array.isArray(state.products) || !state.products.length){
+    state.products=baseProducts.map(p=>normalizeWeightedProduct({...p}));
+  }
+  // Danach jede Kategorie auf 50 unterschiedliche Artikel auffüllen.
+  ensureCatalog50();
+  restoreBuiltInImages();
+  if(!Array.isArray(state.coupons) || !state.coupons.length){
+    state.coupons=seedCoupons.map(c=>({...c}));
+  }
+}
+
+function load(){
+  try{
+    const raw=localStorage.getItem(STATE_KEY);
+    if(raw){
+      const saved=JSON.parse(raw);
+      if(saved && typeof saved==='object'){
+        state={...state,...saved};
+      }
+    }
+  }catch(e){}
+  seedExampleProducts();
+}
+
+function save(){
+  try{
+    // Eingebaute Produktbilder müssen nicht erneut im localStorage gespeichert werden.
+    const builtInCodes=new Set(baseProducts.map(p=>String(p.barcode)));
+    const compact={
+      ...state,
+      products:(state.products||[]).map(p=>{
+        const x={...p};
+        if(builtInCodes.has(String(x.barcode))) delete x.image;
+        return x;
+      })
+    };
+    localStorage.setItem(STATE_KEY,JSON.stringify(compact));
+  }catch(e){
+    // Die Kasse soll auch bei vollem Browser-Speicher weiterlaufen.
+  }
+}
+
 const euro=n=>(Number(n)||0).toLocaleString('de-DE',{style:'currency',currency:'EUR'});
 const num=n=>(Number(n)||0).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2});
 const nowStamp=()=>new Date().toLocaleString('de-DE');
@@ -1939,6 +1995,7 @@ function applyRemoteSnapshot(snapshot){
 }
 
 async function restoreRemoteSession(){
+  seedExampleProducts();
   const status=document.getElementById('backendStatus');
   if(!ksToken()){
     if(status)status.textContent='● Bereit für Online-Anmeldung';
@@ -1960,6 +2017,7 @@ async function restoreRemoteSession(){
 }
 
 window.login=async function(){
+  seedExampleProducts();
   const username=(document.getElementById('loginUser').value||'').trim();
   const password=String(document.getElementById('loginPin').value||'');
   const status=document.getElementById('backendStatus');
