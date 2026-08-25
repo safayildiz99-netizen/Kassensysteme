@@ -331,7 +331,7 @@
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
     <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
-    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: MENGE-ERST-AN-KASSE-21-38</div>
+    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: BLITZSCAN-ECHTE-BARCODES-21-43</div>
     <div class="register-actions">
       <button class="btn" onclick="openCompanyRegistration()">＋ Firmenkonto eröffnen</button>
       <button class="btn" onclick="openEmployeeRegistration()">＋ Mitarbeiterkonto selbst erstellen</button>
@@ -554,7 +554,7 @@ function makeGeneratedProduct(cat,index,id){
 
   const p={
     id,name,cat,price,unit,
-    barcode:String(610000+ci*1000+index+1),
+    barcode:makeProductEAN(id),
     emoji:spec.emoji,generated:true,
     measureMode:mode,
     measurePricingVersion:(mode==='mass'||mode==='volume')?2:undefined
@@ -588,6 +588,7 @@ function ensureCatalog50(){
     }
   }
 
+  state.products.forEach(ensureProductBarcode);
   state.catalogVersion=CATALOG_VERSION;
 }
 function formatMeasure(base,dimension='kg'){
@@ -627,8 +628,10 @@ const STATE_KEY='kassenspiel-online-state-products-v3';
 
 function restoreBuiltInImages(){
   const byBarcode=new Map(baseProducts.map(p=>[String(p.barcode),p]));
+  const byId=new Map(baseProducts.map(p=>[String(p.id),p]));
+  const byName=new Map(baseProducts.map(p=>[String(p.name),p]));
   state.products=(state.products||[]).map(p=>{
-    const original=byBarcode.get(String(p.barcode));
+    const original=byId.get(String(p.id))||byName.get(String(p.name))||byBarcode.get(String(p.barcode));
     if(original && !p.image) p.image=original.image;
     return normalizeWeightedProduct(p);
   });
@@ -663,12 +666,12 @@ function load(){
 function save(){
   try{
     // Eingebaute Produktbilder müssen nicht erneut im localStorage gespeichert werden.
-    const builtInCodes=new Set(baseProducts.map(p=>String(p.barcode)));
+    const builtInIds=new Set(baseProducts.map(p=>String(p.id)));
     const compact={
       ...state,
       products:(state.products||[]).map(p=>{
         const x={...p};
-        if(builtInCodes.has(String(x.barcode))) delete x.image;
+        if(builtInIds.has(String(x.id))) delete x.image;
         return x;
       })
     };
@@ -787,10 +790,20 @@ function isValidEAN13(code){
   const s=String(code||'').replace(/\D/g,'');
   return s.length===13 && s.slice(-1)===ean13Check(s.slice(0,12));
 }
+function ean8Check(seven){
+  const d=String(seven).replace(/\D/g,'').padStart(7,'0').slice(-7).split('').map(Number);
+  let sum=0;
+  for(let i=0;i<7;i++)sum+=d[i]*(i%2===0?3:1);
+  return String((10-(sum%10))%10);
+}
+function isValidEAN8(code){
+  const s=String(code||'').replace(/\D/g,'');
+  return s.length===8 && s.slice(-1)===ean8Check(s.slice(0,7));
+}
 function ensureProductBarcode(p){
   const raw=String(p.barcode||'').replace(/\D/g,'');
   if(raw.length===13&&isValidEAN13(raw)){p.barcode=raw;return p}
-  if(raw.length===8){p.barcode=raw;return p}
+  if(raw.length===8&&isValidEAN8(raw)){p.barcode=raw;return p}
   p.barcode=makeProductEAN(p.id);
   return p;
 }
@@ -808,12 +821,28 @@ function ean13Bits(code){
   for(let i=7;i<=12;i++)bits+=EAN_R[+s[i]];
   return bits+'101';
 }
+function ean8Bits(code){
+  const s=String(code||'').replace(/\D/g,'');
+  if(s.length!==8||!isValidEAN8(s))return '';
+  let bits='101';
+  for(let i=0;i<4;i++)bits+=EAN_L[+s[i]];
+  bits+='01010';
+  for(let i=4;i<8;i++)bits+=EAN_R[+s[i]];
+  return bits+'101';
+}
 function barcodeSvg(code){
   const s=String(code||'').replace(/\D/g,'');
-  const bits=ean13Bits(s);
+  let bits='',viewWidth=95;
+  if(s.length===13&&isValidEAN13(s)){bits=ean13Bits(s);viewWidth=95}
+  else if(s.length===8&&isValidEAN8(s)){bits=ean8Bits(s);viewWidth=67}
   if(!bits)return `<div class="barcode-num">${esc(code)}</div>`;
-  const bars=[...bits].map((b,i)=>b==='1'?`<rect x="${i}" y="0" width="1" height="${(i<3||(i>=45&&i<50)||i>=92)?30:25}" fill="#111"/>`:'').join('');
-  return `<svg viewBox="0 0 95 31" preserveAspectRatio="none" aria-label="EAN-13 ${s}">${bars}</svg><div class="barcode-num">${s}</div>`;
+  const last=bits.length-3;
+  const middleStart=s.length===13?45:31;
+  const middleEnd=s.length===13?50:36;
+  const bars=[...bits].map((b,i)=>b==='1'
+    ?`<rect x="${i}" y="0" width="1" height="${(i<3||(i>=middleStart&&i<middleEnd)||i>=last)?34:28}" fill="#000"/>`
+    :'').join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewWidth} 35" preserveAspectRatio="none" aria-label="Barcode ${s}" shape-rendering="crispEdges">${bars}</svg><div class="barcode-num">${s}</div>`;
 }
 
 function calculateItemCost(line){
@@ -1894,6 +1923,7 @@ function applyInlineWeight(id){
 function focusBarcode(){document.getElementById('barcodeInput').focus()}
 
 function openBarcodeForArticle(prefill=''){
+  state.products.forEach(ensureProductBarcode);save();
   const options=(state.products||[]).map(p=>`<option value="${escAttr(p.name)} · ${escAttr(p.barcode)}"></option>`).join('');
   modal('Barcode für Artikel',`
     <div class="helper" style="margin-bottom:12px">
@@ -1978,29 +2008,44 @@ function printSelectedArticleBarcode(){
   const p=selectedBarcodeArticle();
   if(!p)return toast('Bitte zuerst einen Artikel auswählen','bad');
 
-  const w=window.open('','_blank','width=520,height=650');
+  ensureProductBarcode(p);
+  save();
+  updateBarcodeArticlePreview();
+
+  const barcodeMarkup=barcodeSvg(p.barcode);
+  const w=window.open('','_blank','width=700,height=650');
   if(!w)return toast('Popup wurde blockiert','bad');
 
   w.document.write(`<!doctype html>
   <html><head><meta charset="utf-8"><title>Barcode ${esc(p.name)}</title>
   <style>
-    @page{size:80mm 50mm;margin:3mm}
+    @page{size:80mm 50mm;margin:0}
     *{box-sizing:border-box}
-    body{margin:0;font-family:Arial,sans-serif;color:#111}
-    .label{width:74mm;height:44mm;border:1px solid #ddd;border-radius:3mm;padding:3mm;display:flex;flex-direction:column;justify-content:center}
-    .name{font-weight:800;font-size:12pt;margin-bottom:2mm;text-align:center}
-    .price{text-align:center;font-size:10pt;margin-bottom:2mm}
-    svg{display:block;width:68mm;height:22mm;margin:0 auto}
-    .barcode-num,.code{text-align:center;font-family:monospace;letter-spacing:2px;font-size:9pt}
-    @media print{.label{border:0}}
+    html,body{margin:0!important;padding:0!important;background:#fff!important;width:80mm}
+    body{font-family:Arial,sans-serif;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .label{
+      width:80mm;height:50mm;padding:4mm 5mm;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      overflow:hidden;background:#fff
+    }
+    .name{font-weight:800;font-size:12pt;line-height:1.1;text-align:center;margin-bottom:1.5mm}
+    .price{font-weight:700;text-align:center;font-size:10pt;margin-bottom:2mm}
+    .barcode-wrap{width:70mm}
+    .barcode-wrap svg{display:block!important;width:70mm!important;height:23mm!important;margin:0 auto!important;overflow:visible}
+    .barcode-wrap svg rect{fill:#000!important}
+    .barcode-num{text-align:center;font-family:monospace;font-weight:700;letter-spacing:2.4px;font-size:9.5pt;margin-top:1mm;color:#000}
+    @media print{
+      html,body{width:80mm;height:50mm}
+      .label{page-break-after:avoid;break-after:avoid}
+    }
   </style></head>
   <body>
     <div class="label">
       <div class="name">${esc(p.name)}</div>
-      <div class="price">${euro(p.price)}</div>
-      ${barcodeSvg(p.barcode)}
+      <div class="price">${p.weighted?`${euro(weightedRate(p))} / ${p.weightUnit}`:euro(p.price)}</div>
+      <div class="barcode-wrap">${barcodeMarkup}</div>
     </div>
-    <script>window.onload=()=>{window.print()}<\/script>
+    <script>window.onload=()=>setTimeout(()=>window.print(),180)<\/script>
   </body></html>`);
   w.document.close();
 }
@@ -2257,7 +2302,7 @@ function saveStore(){state.store=document.getElementById('storeName').value.trim
 function switchStore(){showStoreChooser()}
 function newDay(){if(!confirm('Neuen Kassentag starten? Tagesumsatz und Vorgänge werden auf 0 gesetzt. Bons bleiben gespeichert.'))return;state.sales=0;state.tx=0;state.cart=[];state.activeCoupon=null;save();renderAll();toast('Neuer Kassentag gestartet','good')}
 let scanMode='checkout',scanCreateDraft=null;
-let scanStream=null,scanTimer=null,scanDetector=null,scanBusy=false,scanTick=0,scanLoopActive=false,scanTrack=null,scanTorchOn=false;
+let scanStream=null,scanTimer=null,scanDetector=null,scanBusy=false,scanTick=0,scanLoopActive=false,scanTrack=null,scanTorchOn=false,zxingReader=null,zxingControls=null,zxingLoading=null;
 let scanLastValue='',scanLastAt=0,scanAudioCtx=null;
 
 function openScanner(mode='checkout',draft=null){
@@ -2278,7 +2323,7 @@ function openScanner(mode='checkout',draft=null){
       <div class="scan-hint">Barcode vollständig in den Rahmen · Kamera ruhig halten</div>
     </div>
     <div id="scanStatus" class="scan-status">Schnellscan startet …</div>
-    <div class="scan-info">Direkter Scan läuft sehr häufig. Zusätzlich werden regelmäßig Bildausschnitt und Kontrast geprüft.</div>
+    <div class="scan-info">⚡ Doppelerkennung aktiv: EAN-13, EAN-8 und normale Produktbarcodes werden permanent gelesen und sofort übernommen.</div>
     <div id="scanUnknown" class="scan-unknown">
       <b>Unbekannter Barcode erkannt</b>
       <div class="row"><code id="scanUnknownCode"></code><button class="btn green" onclick="createUnknownFromScanner()">＋ Artikel anlegen</button></div>
@@ -2426,7 +2471,7 @@ function acceptScannedCode(val){
   if(!val)return false;
 
   const now=Date.now();
-  if(val===scanLastValue && now-scanLastAt<380)return true;
+  if(val===scanLastValue && now-scanLastAt<250)return true;
   scanLastValue=val;scanLastAt=now;
 
   const p=state.products.find(x=>x.barcode===val);
@@ -2481,6 +2526,62 @@ function acceptManualScan(){
   el.value='';
 }
 
+
+async function ensureZXing(){
+  if(window.ZXingBrowser?.BrowserMultiFormatReader)return true;
+  if(zxingLoading)return zxingLoading;
+
+  zxingLoading=new Promise(resolve=>{
+    const urls=[
+      'https://unpkg.com/@zxing/browser@0.2.1/umd/zxing-browser.min.js',
+      'https://cdn.jsdelivr.net/npm/@zxing/browser@0.2.1/umd/zxing-browser.min.js'
+    ];
+    let i=0;
+    const tryNext=()=>{
+      if(window.ZXingBrowser?.BrowserMultiFormatReader)return resolve(true);
+      if(i>=urls.length)return resolve(false);
+      const s=document.createElement('script');
+      s.src=urls[i++];
+      s.async=true;
+      s.onload=()=>window.ZXingBrowser?.BrowserMultiFormatReader?resolve(true):tryNext();
+      s.onerror=tryNext;
+      document.head.appendChild(s);
+    };
+    tryNext();
+  });
+  return zxingLoading;
+}
+
+async function startZXingScanner(video){
+  const ok=await ensureZXing();
+  if(!ok||!video||!document.body.contains(video)){
+    if(!scanDetector)scannerStatus('Scanner-Bibliothek konnte nicht geladen werden. Internetverbindung prüfen.');
+    return false;
+  }
+
+  try{
+    zxingReader=new ZXingBrowser.BrowserMultiFormatReader(undefined,{
+      delayBetweenScanAttempts:25,
+      delayBetweenScanSuccess:80
+    });
+
+    zxingControls=await zxingReader.decodeFromVideoElement(video,(result,error,controls)=>{
+      if(!result)return;
+      let value='';
+      try{value=result.getText?result.getText():String(result.text||result)}catch(e){}
+      if(value)acceptScannedCode(value);
+    });
+
+    scannerStatus(scanDetector
+      ?'⚡ BLITZ-SCAN läuft – Doppelerkennung aktiv'
+      :'⚡ BLITZ-SCAN läuft – Barcode wird permanent gelesen …');
+    return true;
+  }catch(e){
+    if(!scanDetector)scannerStatus('Kamera läuft, Scanner konnte aber nicht gestartet werden.');
+    return false;
+  }
+}
+
 async function startScanner(){
   try{
     scanStream=await navigator.mediaDevices.getUserMedia({
@@ -2489,45 +2590,48 @@ async function startScanner(){
         width:{ideal:1920},
         height:{ideal:1080},
         frameRate:{ideal:60,min:24}
-      }
+      },
+      audio:false
     });
 
     const v=document.getElementById('scanVideo');
     if(!v)return;
     v.srcObject=scanStream;
-    await v.play().catch(()=>{});
+    await v.play();
 
     scanTrack=scanStream.getVideoTracks()[0]||null;
     if(scanTrack){
       try{
         const caps=scanTrack.getCapabilities?.()||{};
         const advanced=[];
-        if(Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')){
-          advanced.push({focusMode:'continuous'});
-        }
-        if(advanced.length) await scanTrack.applyConstraints({advanced});
+        if(Array.isArray(caps.focusMode)&&caps.focusMode.includes('continuous'))advanced.push({focusMode:'continuous'});
+        if(advanced.length)await scanTrack.applyConstraints({advanced});
       }catch(e){}
       updateTorchButton();
     }
 
+    scanDetector=null;
     if('BarcodeDetector' in window){
-      let formats=['ean_13','ean_8','code_128','code_39','itf','upc_a','upc_e','qr_code'];
       try{
+        let formats=['ean_13','ean_8','code_128','code_39','itf','upc_a','upc_e'];
         if(BarcodeDetector.getSupportedFormats){
           const supported=await BarcodeDetector.getSupportedFormats();
           formats=formats.filter(f=>supported.includes(f));
           if(!formats.length)formats=supported;
         }
-      }catch(e){}
-      scanDetector=new BarcodeDetector({formats});
-      scannerStatus('⚡ Turbo-Scan aktiv – Barcode wird permanent gelesen …');
+        if(formats.length)scanDetector=new BarcodeDetector({formats});
+      }catch(e){scanDetector=null}
+    }
+
+    if(scanDetector){
       scanLoopActive=true;
       runTurboScanLoop();
-    }else{
-      scannerStatus('Dieser Browser unterstützt BarcodeDetector nicht. Nutze die manuelle Eingabe oder einen USB/Bluetooth-Scanner.');
     }
+
+    startZXingScanner(v);
+    scannerStatus('⚡ BLITZ-SCAN startet – Barcode in den grünen Rahmen halten …');
   }catch(e){
-    scannerStatus('Kamera konnte nicht geöffnet werden. Prüfe die Kameraberechtigung.');
+    scannerStatus('Kamera konnte nicht geöffnet werden. Bitte Kamerazugriff erlauben.');
     toast('Kamera konnte nicht geöffnet werden','bad');
   }
 }
@@ -2624,9 +2728,21 @@ async function detectFastFrame(){
 }
 
 async function manualDetectFrame(){
-  scannerStatus('Intensivprüfung läuft …');
-  const ok=await detectMultipleVariants(true);
-  if(!ok)scannerStatus('Noch kein Barcode erkannt – etwas näher herangehen oder Winkel ändern.');
+  scannerStatus('⚡ Soforterkennung läuft …');
+  if(scanDetector){
+    const ok=await detectMultipleVariants(true);
+    if(ok)return;
+  }
+  const v=document.getElementById('scanVideo');
+  if(v && window.ZXingBrowser?.BrowserMultiFormatReader){
+    try{
+      const r=new ZXingBrowser.BrowserMultiFormatReader();
+      const result=await r.decodeOnceFromVideoElement(v);
+      const value=result?.getText?result.getText():String(result?.text||'');
+      if(value&&acceptScannedCode(value))return;
+    }catch(e){}
+  }
+  scannerStatus('Noch kein Barcode erkannt – Barcode größer, scharf und vollständig in den Rahmen halten.');
 }
 
 async function detectMultipleVariants(force=true){
@@ -2687,6 +2803,8 @@ function stopScanner(){
   scanLoopActive=false;
   if(scanTimer){clearTimeout(scanTimer);clearInterval(scanTimer)}
   scanTimer=null;scanDetector=null;scanBusy=false;scanTick=0;
+  try{zxingControls?.stop?.()}catch(e){}
+  zxingControls=null;zxingReader=null;
   if(scanStream)scanStream.getTracks().forEach(t=>t.stop());
   scanStream=null;scanTrack=null;scanTorchOn=false;
 }
