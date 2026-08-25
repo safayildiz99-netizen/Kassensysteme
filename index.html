@@ -331,7 +331,7 @@
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
     <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
-    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: BLITZSCAN-ECHTE-BARCODES-21-43</div>
+    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: SUPER-BLITZSCAN-21-48</div>
     <div class="register-actions">
       <button class="btn" onclick="openCompanyRegistration()">＋ Firmenkonto eröffnen</button>
       <button class="btn" onclick="openEmployeeRegistration()">＋ Mitarbeiterkonto selbst erstellen</button>
@@ -918,7 +918,7 @@ function attachHardwareScanner(){
       if(hardwareFlushTimer)clearTimeout(hardwareFlushTimer);
       hardwareFlushTimer=setTimeout(()=>{
         if(hardwareBuffer.length>=4)flushHardwareScannerBuffer();
-      },48);
+      },24);
     }
   },true);
 }
@@ -2302,7 +2302,7 @@ function saveStore(){state.store=document.getElementById('storeName').value.trim
 function switchStore(){showStoreChooser()}
 function newDay(){if(!confirm('Neuen Kassentag starten? Tagesumsatz und Vorgänge werden auf 0 gesetzt. Bons bleiben gespeichert.'))return;state.sales=0;state.tx=0;state.cart=[];state.activeCoupon=null;save();renderAll();toast('Neuer Kassentag gestartet','good')}
 let scanMode='checkout',scanCreateDraft=null;
-let scanStream=null,scanTimer=null,scanDetector=null,scanBusy=false,scanTick=0,scanLoopActive=false,scanTrack=null,scanTorchOn=false,zxingReader=null,zxingControls=null,zxingLoading=null;
+let scanStream=null,scanTimer=null,scanDetector=null,scanBusy=false,scanTick=0,scanLoopActive=false,scanTrack=null,scanTorchOn=false,zxingReader=null,zxingControls=null,zxingLoading=null,scanFrameHandle=null,scanCropCanvas=null,scanCropCtx=null,scanVideoEl=null;
 let scanLastValue='',scanLastAt=0,scanAudioCtx=null;
 
 function openScanner(mode='checkout',draft=null){
@@ -2311,7 +2311,7 @@ function openScanner(mode='checkout',draft=null){
   const createMode=scanMode==='create';
   modal('Kamera-Scanner',`
     <div class="scan-kicker">KAMERA-BARCODE-SCANNER</div>
-    <div class="scan-fast-badge">⚡ BLITZ-SCAN AKTIV · sofort erkennen · Scanner bleibt offen</div>
+    <div class="scan-fast-badge">⚡ SUPER-BLITZSCAN · Frame-für-Frame · Scanner bleibt offen</div>
     <h2 class="scan-title">${createMode?'Barcode für neuen Artikel scannen':'Produkt scannen'}</h2>
     <div class="scan-lead">${createMode?'Halte den Barcode des neuen Produkts in den grünen Rahmen. Der Code wird direkt in das Artikel-Formular übernommen.':'Halte den Produktbarcode kurz in den grünen Rahmen. Der Artikel wird sofort kassiert und du kannst direkt den nächsten Barcode scannen.'}</div>
     <div class="scan-shell">
@@ -2323,7 +2323,7 @@ function openScanner(mode='checkout',draft=null){
       <div class="scan-hint">Barcode vollständig in den Rahmen · Kamera ruhig halten</div>
     </div>
     <div id="scanStatus" class="scan-status">Schnellscan startet …</div>
-    <div class="scan-info">⚡ Doppelerkennung aktiv: EAN-13, EAN-8 und normale Produktbarcodes werden permanent gelesen und sofort übernommen.</div>
+    <div class="scan-info">⚡ SUPER-BLITZSCAN: Jeder neue Kameraframe wird geprüft. EAN-13, EAN-8 und normale Produktbarcodes werden sofort übernommen.</div>
     <div id="scanUnknown" class="scan-unknown">
       <b>Unbekannter Barcode erkannt</b>
       <div class="row"><code id="scanUnknownCode"></code><button class="btn green" onclick="createUnknownFromScanner()">＋ Artikel anlegen</button></div>
@@ -2471,7 +2471,7 @@ function acceptScannedCode(val){
   if(!val)return false;
 
   const now=Date.now();
-  if(val===scanLastValue && now-scanLastAt<250)return true;
+  if(val===scanLastValue && now-scanLastAt<160)return true;
   scanLastValue=val;scanLastAt=now;
 
   const p=state.products.find(x=>x.barcode===val);
@@ -2561,8 +2561,8 @@ async function startZXingScanner(video){
 
   try{
     zxingReader=new ZXingBrowser.BrowserMultiFormatReader(undefined,{
-      delayBetweenScanAttempts:25,
-      delayBetweenScanSuccess:80
+      delayBetweenScanAttempts:8,
+      delayBetweenScanSuccess:55
     });
 
     zxingControls=await zxingReader.decodeFromVideoElement(video,(result,error,controls)=>{
@@ -2584,19 +2584,24 @@ async function startZXingScanner(video){
 
 async function startScanner(){
   try{
+    // 1280x720 is intentionally preferred over 1920x1080:
+    // barcode decoding is noticeably quicker and still sharp enough.
     scanStream=await navigator.mediaDevices.getUserMedia({
       video:{
         facingMode:{ideal:'environment'},
-        width:{ideal:1920},
-        height:{ideal:1080},
-        frameRate:{ideal:60,min:24}
+        width:{ideal:1280,max:1920},
+        height:{ideal:720,max:1080},
+        frameRate:{ideal:60,min:30}
       },
       audio:false
     });
 
     const v=document.getElementById('scanVideo');
     if(!v)return;
+    scanVideoEl=v;
     v.srcObject=scanStream;
+    v.setAttribute('playsinline','');
+    v.muted=true;
     await v.play();
 
     scanTrack=scanStream.getVideoTracks()[0]||null;
@@ -2604,7 +2609,17 @@ async function startScanner(){
       try{
         const caps=scanTrack.getCapabilities?.()||{};
         const advanced=[];
-        if(Array.isArray(caps.focusMode)&&caps.focusMode.includes('continuous'))advanced.push({focusMode:'continuous'});
+
+        if(Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')){
+          advanced.push({focusMode:'continuous'});
+        }
+        if(Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous')){
+          advanced.push({exposureMode:'continuous'});
+        }
+        if(caps.zoom && Number.isFinite(caps.zoom.min) && Number.isFinite(caps.zoom.max) && caps.zoom.max>caps.zoom.min){
+          const zoom=Math.min(caps.zoom.max,Math.max(caps.zoom.min,caps.zoom.min+(caps.zoom.max-caps.zoom.min)*0.12));
+          advanced.push({zoom});
+        }
         if(advanced.length)await scanTrack.applyConstraints({advanced});
       }catch(e){}
       updateTorchButton();
@@ -2623,28 +2638,49 @@ async function startScanner(){
       }catch(e){scanDetector=null}
     }
 
-    if(scanDetector){
-      scanLoopActive=true;
-      runTurboScanLoop();
-    }
+    scanLoopActive=true;
+    scanTick=0;
+    scanCropCanvas=document.createElement('canvas');
+    scanCropCtx=scanCropCanvas.getContext('2d',{alpha:false,willReadFrequently:false});
 
-    startZXingScanner(v);
-    scannerStatus('⚡ BLITZ-SCAN startet – Barcode in den grünen Rahmen halten …');
+    if(scanDetector){
+      scannerStatus('⚡ SUPER-BLITZSCAN aktiv – jeder Kameraframe wird sofort geprüft …');
+      startNativeFrameScanner(v);
+    }else{
+      scannerStatus('⚡ SUPER-BLITZSCAN startet …');
+      await startZXingScanner(v);
+    }
   }catch(e){
     scannerStatus('Kamera konnte nicht geöffnet werden. Bitte Kamerazugriff erlauben.');
     toast('Kamera konnte nicht geöffnet werden','bad');
   }
 }
 
+function startNativeFrameScanner(video){
+  const loop=async()=>{
+    if(!scanLoopActive||!scanDetector||!video)return;
+    if(!scanBusy){
+      try{await detectFastFrame()}catch(e){}
+    }
+    if(!scanLoopActive||!scanDetector)return;
+
+    if(typeof video.requestVideoFrameCallback==='function'){
+      scanFrameHandle=video.requestVideoFrameCallback(()=>loop());
+    }else{
+      scanTimer=setTimeout(loop,8);
+    }
+  };
+
+  if(typeof video.requestVideoFrameCallback==='function'){
+    scanFrameHandle=video.requestVideoFrameCallback(()=>loop());
+  }else{
+    loop();
+  }
+}
+
+// Kept as compatibility entry point.
 async function runTurboScanLoop(){
-  if(!scanLoopActive||!scanDetector)return;
-  const started=performance.now();
-  try{await detectFastFrame()}catch(e){}
-  if(!scanLoopActive||!scanDetector)return;
-  const elapsed=performance.now()-started;
-  // praktisch direkt den nächsten Frame prüfen; auf langsamen Geräten automatisch etwas Luft lassen
-  const wait=elapsed>90?8:18;
-  scanTimer=setTimeout(runTurboScanLoop,wait);
+  if(scanVideoEl)startNativeFrameScanner(scanVideoEl);
 }
 
 function updateTorchButton(){
@@ -2673,54 +2709,42 @@ async function toggleScannerTorch(){
 
 async function detectFastFrame(){
   if(scanBusy||!scanDetector)return false;
-  const v=document.getElementById('scanVideo');
-  if(!v||v.readyState<2)return false;
+  const v=scanVideoEl||document.getElementById('scanVideo');
+  if(!v||v.readyState<2||!v.videoWidth||!v.videoHeight)return false;
+
   scanBusy=true;
   scanTick++;
   try{
-    try{
-      const direct=await scanDetector.detect(v);
-      if(direct?.length){
-        for(const code of direct){
-          if(acceptScannedCode(code.rawValue))return true;
-        }
-      }
-    }catch(e){}
+    let target=v;
 
-    // Mittlerer Ausschnitt nur jede 3. Runde -> schneller als jedes Mal alle Varianten
-    if(scanTick%2!==0)return false;
+    // Alternate full frame / central barcode strip.
+    // Only ONE detector call per camera frame keeps latency very low.
+    if(scanTick%2===0 && scanCropCanvas && scanCropCtx){
+      const vw=v.videoWidth,vh=v.videoHeight;
+      const sx=Math.floor(vw*.04);
+      const sy=Math.floor(vh*.23);
+      const sw=Math.floor(vw*.92);
+      const sh=Math.floor(vh*.54);
 
-    const vw=v.videoWidth||1280,vh=v.videoHeight||720;
-    if(!vw||!vh)return false;
-    const sx=Math.floor(vw*.06), sy=Math.floor(vh*.22), sw=Math.floor(vw*.88), sh=Math.floor(vh*.56);
-    const base=document.createElement('canvas');
-    base.width=Math.min(sw,900);base.height=Math.round(base.width*(sh/sw));
-    const bctx=base.getContext('2d',{willReadFrequently:true});
-    bctx.drawImage(v,sx,sy,sw,sh,0,0,base.width,base.height);
-    try{
-      const found=await scanDetector.detect(base);
-      if(found?.length){
-        for(const code of found){
-          if(acceptScannedCode(code.rawValue))return true;
-        }
+      const targetW=Math.min(820,sw);
+      const targetH=Math.max(240,Math.round(targetW*(sh/sw)));
+      if(scanCropCanvas.width!==targetW||scanCropCanvas.height!==targetH){
+        scanCropCanvas.width=targetW;
+        scanCropCanvas.height=targetH;
       }
-    }catch(e){}
+      scanCropCtx.drawImage(v,sx,sy,sw,sh,0,0,targetW,targetH);
+      target=scanCropCanvas;
+    }
 
-    // Kontrast nur jede 6. Runde
-    if(scanTick%4!==0)return false;
-    const contrast=document.createElement('canvas');
-    contrast.width=base.width;contrast.height=base.height;
-    const cctx=contrast.getContext('2d',{willReadFrequently:true});
-    cctx.filter='grayscale(1) contrast(2.15)';
-    cctx.drawImage(base,0,0);
-    try{
-      const found=await scanDetector.detect(contrast);
-      if(found?.length){
-        for(const code of found){
-          if(acceptScannedCode(code.rawValue))return true;
-        }
+    const found=await scanDetector.detect(target);
+    if(found?.length){
+      for(const code of found){
+        const val=code?.rawValue||'';
+        if(val && acceptScannedCode(val))return true;
       }
-    }catch(e){}
+    }
+    return false;
+  }catch(e){
     return false;
   }finally{
     scanBusy=false;
@@ -2802,11 +2826,16 @@ async function detectMultipleVariants(force=true){
 function stopScanner(){
   scanLoopActive=false;
   if(scanTimer){clearTimeout(scanTimer);clearInterval(scanTimer)}
+  if(scanVideoEl && scanFrameHandle!=null && typeof scanVideoEl.cancelVideoFrameCallback==='function'){
+    try{scanVideoEl.cancelVideoFrameCallback(scanFrameHandle)}catch(e){}
+  }
+  scanFrameHandle=null;
   scanTimer=null;scanDetector=null;scanBusy=false;scanTick=0;
   try{zxingControls?.stop?.()}catch(e){}
   zxingControls=null;zxingReader=null;
   if(scanStream)scanStream.getTracks().forEach(t=>t.stop());
   scanStream=null;scanTrack=null;scanTorchOn=false;
+  scanCropCanvas=null;scanCropCtx=null;scanVideoEl=null;
 }
 function renderUserActions(){
   const badge=document.getElementById('currentUserBadge'),
