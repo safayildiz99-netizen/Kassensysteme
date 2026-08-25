@@ -331,7 +331,7 @@
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
     <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
-    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: TURBO-SCAN-BARCODE-ARTIKEL-21-40</div>
+    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: MENGE-ERST-AN-KASSE-21-38</div>
     <div class="register-actions">
       <button class="btn" onclick="openCompanyRegistration()">＋ Firmenkonto eröffnen</button>
       <button class="btn" onclick="openEmployeeRegistration()">＋ Mitarbeiterkonto selbst erstellen</button>
@@ -365,7 +365,7 @@
 <header>
   <div class="topbar">
     <div class="brand"><div class="logo"><i></i><i></i><i></i></div><div><b>KASSENSPIEL</b><small id="storeSub">Alle · Star Markt</small></div></div>
-    <div class="notice">● Produkt antippen = hinzufügen · Gramm/Kilo-Artikel berechnen das Gewicht automatisch</div>
+    <div class="notice">● Produkt antippen · Gewicht erst an der Kasse in g/kg eingeben · Flüssigkeiten in ml/L</div>
     <div class="top-actions">
       <span id="currentUserBadge" class="role-badge">👤 –</span>
       <button id="superAdminBtn" class="btn primary hidden" onclick="openSuperAdminDashboard()">★ Groß-Admin</button>
@@ -479,34 +479,86 @@ function baseToStandard(qty,unit){
   if(unit==='g'||unit==='ml')return qty/1000;
   return qty;
 }
+
+function inferredMeasureMode(p){
+  const n=String(p?.name||'').toLowerCase();
+  const cat=String(p?.cat||'');
+  const basis=parseBasisUnit(p?.unit||'');
+
+  // Flüssige Produktgruppen zuerst erkennen, auch wenn alte Demo-Daten fälschlich "g" enthielten.
+  if(cat==='Getränke' || cat==='Kraftstoff') return 'volume';
+  if(cat==='Kühlregal' && /(vollmilch|fettarme milch|h-milch|laktosefreie milch|buttermilch|kefir|ayran|schlagsahne|kochsahne|kondensmilch)/i.test(n)) return 'volume';
+
+  if(basis){
+    if(basis.unit==='l'||basis.unit==='ml') return 'volume';
+    if(basis.unit==='kg'||basis.unit==='g') return 'mass';
+  }
+  return 'piece';
+}
+
 function normalizeWeightedProduct(p){
-  const basis=parseBasisUnit(p.unit);
-  const isMass=!!basis&&(basis.unit==='g'||basis.unit==='kg');
-  const isVolume=!!basis&&(basis.unit==='l'||basis.unit==='ml');
-  if(isMass){
-    p.weighted=true;p.weightUnit='kg';p.baseQty=basis.qty;p.baseUnit=basis.unit;
-  }else if(p.cat==='Kraftstoff'&&isVolume){
-    p.weighted=true;p.weightUnit='L';p.baseQty=basis.qty;p.baseUnit=basis.unit;
-  }else if(p.weighted){
-    p.weightUnit=p.weightUnit||'kg';
-    if(!p.baseQty){p.baseQty=1;p.baseUnit=p.weightUnit==='L'?'l':'kg'}
+  if(!p)return p;
+
+  let mode=p.measureMode||inferredMeasureMode(p);
+  const oldBasis=parseBasisUnit(p.unit);
+
+  if(mode==='mass' || mode==='volume'){
+    const dim=mode==='volume'?'L':'kg';
+    p.weighted=true;
+    p.measureMode=mode;
+    p.weightUnit=dim;
+
+    // Automatisch erzeugte Beispielprodukte verwenden den gespeicherten Preis direkt als €/kg bzw. €/L.
+    // Dadurch gibt es keine erfundenen 250g-/500g-Packungsgrößen mehr.
+    if(p.generated || p.measurePricingVersion===2 || !oldBasis){
+      p.measurePricingVersion=2;
+      p.baseQty=1;
+      p.baseUnit=dim==='L'?'l':'kg';
+      p.unit=dim; // nur interne Einheit, auf der Karte wird "Preis pro ..." angezeigt
+    }else{
+      // Alte echte Basisartikel werden sauber auf ihren Grundpreis umgerechnet.
+      p.baseQty=oldBasis.qty;
+      p.baseUnit=oldBasis.unit;
+    }
+  }else{
+    p.measureMode='piece';
+    p.weighted=false;
+    p.weightUnit=null;
+    p.baseQty=null;
+    p.baseUnit=null;
+    if(!p.unit || /^(kg|g|l|ml)$/i.test(String(p.unit))) p.unit='Stück';
   }
   return p;
 }
+
 function weightedRate(p){
-  if(!p.weighted)return Number(p.price)||0;
+  if(!p?.weighted)return Number(p?.price)||0;
+  if(p.measurePricingVersion===2 || p.generated){
+    return Number(p.price)||0;
+  }
   const q=baseToStandard(Number(p.baseQty)||1,p.baseUnit||(p.weightUnit==='L'?'l':'kg'));
   return q>0?(Number(p.price)||0)/q:(Number(p.price)||0);
 }
 function makeGeneratedProduct(cat,index,id){
   const spec=CAT_FACTORY[cat],names=spec.names,units=spec.units;
   const name=names[index%names.length];
-  const unit=units[index%units.length];
+  const sourceUnit=units[index%units.length];
   const ci=CATS.indexOf(cat);
   const frac=((index*37+ci*19)%101)/100;
   let price=spec.range[0]+frac*(spec.range[1]-spec.range[0]);
   if(cat==='Kraftstoff')price=Math.round(price*1000)/1000; else price=Math.round(price*100)/100;
-  const p={id,name,cat,price,unit,barcode:String(610000+ci*1000+index+1),emoji:spec.emoji,generated:true};
+
+  const draft={name,cat,unit:sourceUnit};
+  const mode=inferredMeasureMode(draft);
+  const unit=mode==='volume'?'L':mode==='mass'?'kg':sourceUnit;
+
+  const p={
+    id,name,cat,price,unit,
+    barcode:String(610000+ci*1000+index+1),
+    emoji:spec.emoji,generated:true,
+    measureMode:mode,
+    measurePricingVersion:(mode==='mass'||mode==='volume')?2:undefined
+  };
   normalizeWeightedProduct(p);
   return p;
 }
@@ -559,7 +611,9 @@ function parseMeasureText(text,dimension='kg'){
   return {ok:true,base,unit:u,value:v};
 }
 function basisText(p){
-  return p.weighted?`${p.unit} = ${euro(p.price)} · ${weightedRate(p).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:3})} €/${p.weightUnit}`:`${p.unit} · ${euro(p.price)}`;
+  if(!p.weighted)return `${p.unit} · ${euro(p.price)}`;
+  const label=p.weightUnit==='L'?'Liter':'kg';
+  return `Preis: ${euro(weightedRate(p))} / ${label}`;
 }
 
 const seedCoupons=[
@@ -1688,11 +1742,11 @@ function productCard(p){
       onerror="this.onerror=null;this.src=categoryPhotoFallback(state.products.find(x=>x.id===${p.id})||{})||productFallbackImage(state.products.find(x=>x.id===${p.id})||{name:'Produkt',emoji:'🛒'})"></div>
     <div class="prod-body">
       <div class="prod-name" title="${esc(p.name)}">${esc(p.name)}</div>
-      <div class="prod-meta">${esc(p.unit||'Stück')} · #${esc(p.barcode)}</div>
-      ${p.weighted?`<div class="weight-chip">⚖ ${esc(basisText(p))}</div>`:''}
-      <div class="prod-bottom"><div class="price">${euro(p.price)}</div><div class="prod-btns"><button class="icon-btn" title="Bearbeiten" onclick="event.stopPropagation();editProduct(${p.id})">✎</button></div></div>
+      <div class="prod-meta">${p.weighted?(p.weightUnit==='L'?'Flüssigkeit · Preis pro Liter':'Wiegeartikel · Preis pro kg'):esc(p.unit||'Stück')} · #${esc(p.barcode)}</div>
+      ${p.weighted?`<div class="weight-chip">⚖ Menge erst an der Kasse eingeben · ${p.weightUnit==='L'?'ml / L':'g / kg'}</div>`:''}
+      <div class="prod-bottom"><div class="price">${p.weighted?`${euro(weightedRate(p))} / ${p.weightUnit}`:euro(p.price)}</div><div class="prod-btns"><button class="icon-btn" title="Bearbeiten" onclick="event.stopPropagation();editProduct(${p.id})">✎</button></div></div>
       <div class="barcode-label" onclick="event.stopPropagation()" title="EAN-Barcode">${barcodeSvg(p.barcode)}</div>
-      <div class="prod-tap">${p.weighted?'Antippen → Gewicht eingeben':'Antippen → direkt hinzufügen'}</div>
+      <div class="prod-tap">${p.weighted?(p.weightUnit==='L'?'Antippen → ml / Liter eingeben':'Antippen → g / kg eingeben'):'Antippen → direkt hinzufügen'}</div>
     </div>
   </article>`;
 }
@@ -1740,15 +1794,36 @@ function addProduct(id){
 function openProductWeight(id){
   const p=state.products.find(x=>x.id===id);if(!p)return;
   const dim=p.weightUnit||'kg';
-  const sample=dim==='L'?'12,5 L':'0,735 kg';
-  const quick=dim==='L'?['5 L','10 L','20 L','40 L']:['100 g','250 g','500 g','0,735 kg','1 kg'];
-  modal('Gewicht / Menge eingeben',`
-    <div class="helper" style="margin-bottom:8px"><b>${esc(p.name)}</b><br>Auszeichnung: ${esc(p.unit)} = <b>${euro(p.price)}</b></div>
-    <div class="weight-example">Du musst nichts ausrechnen. Gib einfach das echte Gewicht ein, z. B. <b>${sample}</b>. Der Preis wird automatisch berechnet.</div>
-    <div class="form-group" style="margin-top:14px"><label>Gewicht / Menge</label><input id="newWeightText" inputmode="decimal" placeholder="${sample} oder ${dim==='L'?'12500 ml':'735 g'}" oninput="previewProductWeight(${id})" autofocus></div>
+  const isLiquid=dim==='L';
+  const sample=isLiquid?'750 ml':'735 g';
+  const quick=isLiquid
+    ?['100 ml','250 ml','500 ml','750 ml','1 L','1,5 L','2 L']
+    :['100 g','250 g','500 g','750 g','1 kg','1,5 kg','2 kg'];
+
+  modal(isLiquid?'Flüssigkeitsmenge eingeben':'Gewicht eingeben',`
+    <div class="helper" style="margin-bottom:8px">
+      <b>${esc(p.name)}</b><br>
+      Preis: <b>${euro(weightedRate(p))} / ${isLiquid?'Liter':'kg'}</b>
+    </div>
+    <div class="weight-example">
+      Die Produktkarte gibt <b>keine feste Menge</b> mehr vor.
+      Gib hier erst an der Kasse ein, wie viel der Kunde wirklich hat –
+      z. B. <b>${sample}</b>.
+    </div>
+    <div class="form-group" style="margin-top:14px">
+      <label>${isLiquid?'Menge in ml oder Liter':'Gewicht in g oder kg'}</label>
+      <input id="newWeightText" inputmode="decimal"
+        placeholder="${isLiquid?'z. B. 750 ml oder 1,5 L':'z. B. 735 g oder 1,5 kg'}"
+        oninput="previewProductWeight(${id})" autofocus>
+    </div>
     <div class="quickweights">${quick.map(v=>`<button onclick="document.getElementById('newWeightText').value='${v}';previewProductWeight(${id})">${v}</button>`).join('')}</div>
-    <div class="calc" style="margin-top:14px"><span>Automatisch berechneter Preis</span><b id="newWeightPreview">0,00 €</b></div>
-    <div class="helper" style="margin-top:9px">Rechenbasis: ${weightedRate(p).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:3})} €/${dim}<br>${dim==='kg'?'<b>Tipp:</b> Für 90 g schreibe <b>90 g</b> oder <b>0,090 kg</b> – nicht 0,090 g.':''}</div>
+    <div class="calc" style="margin-top:14px">
+      <span>Automatisch berechneter Preis</span>
+      <b id="newWeightPreview">0,00 €</b>
+    </div>
+    <div class="helper" style="margin-top:9px">
+      ${isLiquid?'Akzeptiert ml und L. Beispiel: 500 ml, 1 L, 1,25 L.':'Akzeptiert g und kg. Beispiel: 90 g, 735 g, 1,2 kg.'}
+    </div>
   `,`<button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn green" onclick="addWeightedProduct(${id})">In den Warenkorb</button>`);
 }
 function previewProductWeight(id){
@@ -1758,11 +1833,11 @@ function previewProductWeight(id){
 function addWeightedProduct(id){
   const p=state.products.find(x=>x.id===id),el=document.getElementById('newWeightText');if(!p||!el)return;
   const dim=p.weightUnit||'kg',m=parseMeasureText(el.value,dim);
-  if(!m.ok){toast(`Bitte Gewicht eingeben, z. B. ${dim==='L'?'12,5 L':'0,735 kg oder 735 g'}`,'bad');return}
+  if(!m.ok){toast(dim==='L'?'Bitte Menge eingeben, z. B. 750 ml oder 1,5 L':'Bitte Gewicht eingeben, z. B. 735 g oder 1,5 kg','bad');return}
   const rate=weightedRate(p);
   const existing=state.cart.find(x=>x.productId===id&&x.weighted);
-  if(existing){existing.weight=+(existing.weight+m.base).toFixed(6);existing.unitPrice=rate;existing.linePrice=+(existing.weight*rate).toFixed(2);existing.priceBasis=p.price;existing.basisUnit=p.unit}
-  else state.cart.push({lineId:uid(),productId:id,name:p.name,unit:p.unit,barcode:p.barcode,emoji:p.emoji,qty:1,weighted:true,weight:m.base,weightUnit:dim,unitPrice:rate,linePrice:+(m.base*rate).toFixed(2),priceBasis:p.price,basisUnit:p.unit,manualPrice:false});
+  if(existing){existing.weight=+(existing.weight+m.base).toFixed(6);existing.unitPrice=rate;existing.linePrice=+(existing.weight*rate).toFixed(2);existing.priceBasis=rate;existing.basisUnit=''}
+  else state.cart.push({lineId:uid(),productId:id,name:p.name,unit:p.unit,barcode:p.barcode,emoji:p.emoji,qty:1,weighted:true,weight:m.base,weightUnit:dim,unitPrice:rate,linePrice:+(m.base*rate).toFixed(2),priceBasis:rate,basisUnit:'',manualPrice:false});
   beep();save();closeModal();renderCart();toast(`${p.name}: ${formatMeasure(m.base,dim)} = ${euro(m.base*rate)}`,'good')
 }
 function removeLine(lineId){state.cart=state.cart.filter(x=>x.lineId!==lineId);save();renderCart()}
@@ -1799,7 +1874,7 @@ function renderCart(){
   if(!state.cart.length){
     root.innerHTML='<div class="empty"><div><div class="basket">🛒</div><b>Noch keine Artikel</b><small>Produkt links einfach antippen oder Barcode scannen</small></div></div>'
   }else{
-    root.innerHTML=state.cart.map(x=>`<div class="cart-item"><div><div class="cart-item-title">${esc(x.name)}</div><div class="cart-item-sub">${x.weighted?`${formatMeasure(x.weight,x.weightUnit)} × ${euro(x.unitPrice)}/${x.weightUnit}${x.basisUnit?` · Basis ${esc(x.basisUnit)} = ${euro(x.priceBasis||0)}`:''}`:`${x.qty} × ${euro(x.unitPrice)}`}${x.manualPrice?' · Preis manuell geändert':''}</div>${x.weighted?`<div class="inline-weight"><input id="inlineWeight_${x.lineId}" value="${formatMeasure(x.weight,x.weightUnit)}" onkeydown="if(event.key==='Enter')applyInlineWeight('${x.lineId}')" title="z. B. 0,735 kg oder 735 g"><button class="smallbtn weight" onclick="applyInlineWeight('${x.lineId}')">⚖ Berechnen</button></div>`:''}<div class="cart-item-actions">${!x.weighted?`<span class="qty"><button onclick="qty('${x.lineId}',-1)">−</button><span>${x.qty}</span><button onclick="qty('${x.lineId}',1)">+</button></span>`:''}<button class="smallbtn" onclick="openPrice('${x.lineId}')">✎ Preis</button><button class="smallbtn red" onclick="removeLine('${x.lineId}')">Entfernen</button></div></div><div class="cart-item-price">${euro(x.linePrice)}</div></div>`).join('')
+    root.innerHTML=state.cart.map(x=>`<div class="cart-item"><div><div class="cart-item-title">${esc(x.name)}</div><div class="cart-item-sub">${x.weighted?`${formatMeasure(x.weight,x.weightUnit)} × ${euro(x.unitPrice)}/${x.weightUnit}`:`${x.qty} × ${euro(x.unitPrice)}`}${x.manualPrice?' · Preis manuell geändert':''}</div>${x.weighted?`<div class="inline-weight"><input id="inlineWeight_${x.lineId}" value="${formatMeasure(x.weight,x.weightUnit)}" onkeydown="if(event.key==='Enter')applyInlineWeight('${x.lineId}')" title="z. B. 0,735 kg oder 735 g"><button class="smallbtn weight" onclick="applyInlineWeight('${x.lineId}')">⚖ Berechnen</button></div>`:''}<div class="cart-item-actions">${!x.weighted?`<span class="qty"><button onclick="qty('${x.lineId}',-1)">−</button><span>${x.qty}</span><button onclick="qty('${x.lineId}',1)">+</button></span>`:''}<button class="smallbtn" onclick="openPrice('${x.lineId}')">✎ Preis</button><button class="smallbtn red" onclick="removeLine('${x.lineId}')">Entfernen</button></div></div><div class="cart-item-price">${euro(x.linePrice)}</div></div>`).join('')
   }
   const cp=document.getElementById('couponStrip');
   if(state.activeCoupon){cp.classList.remove('hidden');cp.innerHTML=`🎟 <div><b>${esc(state.activeCoupon.label)}</b><br><span>Code ${esc(state.activeCoupon.code)} · −${euro(couponAmount())}</span></div><button onclick="removeCoupon()">✕</button>`}else cp.classList.add('hidden');
@@ -2014,7 +2089,7 @@ function finishPayment(type){
   toast(`${payMethod}: ${euro(ch)} bezahlt · Bon ${r.id}`,'good');
   setTimeout(()=>showReceipt(r.id),420);
 }
-function receiptHtml(r,print=false){return `<div class="receipt" style="font-family:'Courier New',monospace;color:#111;background:#fff;width:80mm;padding:6mm 5mm;border:${print?'0':'1px dashed #bbb'};font-size:10px;line-height:1.35"><div style="text-align:center"><div style="width:24mm;height:20mm;background:#111;color:#fff;margin:0 auto 3mm;display:grid;place-items:center;font-family:Arial;font-size:11px;font-weight:800">★<br>${esc(r.store)}</div><div style="letter-spacing:.28em;font-size:8px">KASSENBON</div></div><div style="display:flex;justify-content:space-between;margin:6mm 0 2mm;font-size:8px"><span>${new Date(r.date).toLocaleString('de-DE')}</span><span>Bon ${r.id}</span></div><div style="border-top:1px dashed #111;margin-bottom:2mm"></div>${r.items.map(x=>`<div style="display:grid;grid-template-columns:1fr auto;gap:3mm;margin:1.6mm 0"><div><b>${esc(x.name)}</b><div style="font-size:8px;color:#444">${x.weighted?`${formatMeasure(x.weight,x.weightUnit)} × ${euro(x.unitPrice)}/${x.weightUnit}${x.basisUnit?` · Basis ${esc(x.basisUnit)} ${euro(x.priceBasis||0)}`:''}`:`${x.qty} × ${euro(x.unitPrice)}`}</div></div><b>${euro(x.linePrice)}</b></div>`).join('')}${r.coupon?`<div style="display:grid;grid-template-columns:1fr auto;gap:3mm;margin:2mm 0"><div>Coupon: ${esc(r.coupon.code)}</div><b>−${euro(r.discount)}</b></div>`:''}<div style="border-top:1px dashed #111;margin:3mm 0"></div><div style="display:flex;justify-content:space-between;font-size:15px"><b>SUMME</b><b>${euro(r.total)}</b></div><div style="display:flex;justify-content:space-between;margin-top:1mm"><span>Enthaltene MwSt. 19 %</span><span>${euro(r.vat)}</span></div><div style="display:flex;justify-content:space-between"><span>Zahlung</span><span>${r.payment==='card'?(r.paymentMethod||'Karte'):'Bar'}</span></div><div style="display:flex;justify-content:space-between"><span>Kassierer</span><span>${esc(r.cashierUsername||'admin')}</span></div>${r.note?`<div style="margin-top:3mm;font-size:8px">Notiz: ${esc(r.note)}</div>`:''}${r.coupon?`<div style="margin-top:2mm;font-size:8px">Notiz: ${esc(r.coupon.label)} eingelöst.</div>`:''}<div style="border-top:1px dashed #111;margin:3mm 0"></div><div style="height:15mm;background:repeating-linear-gradient(90deg,#111 0 1px,#fff 1px 2px,#111 2px 4px,#fff 4px 6px);margin:0 2mm"></div><div style="text-align:center;margin-top:1mm;font-size:7px">${r.id}${r.id}${r.id}</div><div style="text-align:center;margin-top:3mm;font-weight:800">Vielen Dank für Ihren Einkauf!</div><div style="text-align:center;font-size:7px;margin-top:2mm">Barcode scannen, um diesen Bon digital zu öffnen.</div></div>`}
+function receiptHtml(r,print=false){return `<div class="receipt" style="font-family:'Courier New',monospace;color:#111;background:#fff;width:80mm;padding:6mm 5mm;border:${print?'0':'1px dashed #bbb'};font-size:10px;line-height:1.35"><div style="text-align:center"><div style="width:24mm;height:20mm;background:#111;color:#fff;margin:0 auto 3mm;display:grid;place-items:center;font-family:Arial;font-size:11px;font-weight:800">★<br>${esc(r.store)}</div><div style="letter-spacing:.28em;font-size:8px">KASSENBON</div></div><div style="display:flex;justify-content:space-between;margin:6mm 0 2mm;font-size:8px"><span>${new Date(r.date).toLocaleString('de-DE')}</span><span>Bon ${r.id}</span></div><div style="border-top:1px dashed #111;margin-bottom:2mm"></div>${r.items.map(x=>`<div style="display:grid;grid-template-columns:1fr auto;gap:3mm;margin:1.6mm 0"><div><b>${esc(x.name)}</b><div style="font-size:8px;color:#444">${x.weighted?`${formatMeasure(x.weight,x.weightUnit)} × ${euro(x.unitPrice)}/${x.weightUnit}`:`${x.qty} × ${euro(x.unitPrice)}`}</div></div><b>${euro(x.linePrice)}</b></div>`).join('')}${r.coupon?`<div style="display:grid;grid-template-columns:1fr auto;gap:3mm;margin:2mm 0"><div>Coupon: ${esc(r.coupon.code)}</div><b>−${euro(r.discount)}</b></div>`:''}<div style="border-top:1px dashed #111;margin:3mm 0"></div><div style="display:flex;justify-content:space-between;font-size:15px"><b>SUMME</b><b>${euro(r.total)}</b></div><div style="display:flex;justify-content:space-between;margin-top:1mm"><span>Enthaltene MwSt. 19 %</span><span>${euro(r.vat)}</span></div><div style="display:flex;justify-content:space-between"><span>Zahlung</span><span>${r.payment==='card'?(r.paymentMethod||'Karte'):'Bar'}</span></div><div style="display:flex;justify-content:space-between"><span>Kassierer</span><span>${esc(r.cashierUsername||'admin')}</span></div>${r.note?`<div style="margin-top:3mm;font-size:8px">Notiz: ${esc(r.note)}</div>`:''}${r.coupon?`<div style="margin-top:2mm;font-size:8px">Notiz: ${esc(r.coupon.label)} eingelöst.</div>`:''}<div style="border-top:1px dashed #111;margin:3mm 0"></div><div style="height:15mm;background:repeating-linear-gradient(90deg,#111 0 1px,#fff 1px 2px,#111 2px 4px,#fff 4px 6px);margin:0 2mm"></div><div style="text-align:center;margin-top:1mm;font-size:7px">${r.id}${r.id}${r.id}</div><div style="text-align:center;margin-top:3mm;font-weight:800">Vielen Dank für Ihren Einkauf!</div><div style="text-align:center;font-size:7px;margin-top:2mm">Barcode scannen, um diesen Bon digital zu öffnen.</div></div>`}
 function showReceipt(id){const r=state.receipts.find(x=>x.id===id);if(!r)return;modal(`Bon ${r.id}`,`<div style="display:flex;justify-content:center">${receiptHtml(r)}</div>`,`<button class="btn" onclick="closeModal()">Schließen</button><button class="btn green" onclick="printReceipts(['${r.id}'])">Drucken</button>`)}
 function openReceipts(){modal('Bons auswählen & drucken',`<div class="toolbar"><button class="btn soft" onclick="selectAllReceipts(true)">Alle auswählen</button><button class="btn" onclick="selectAllReceipts(false)">Auswahl aufheben</button></div><div id="printSummary" class="print-summary">0 Bons ausgewählt</div><div class="helper" style="margin:-3px 0 10px">Du kannst beliebig viele verschiedene Bons markieren. Sie werden automatisch auf möglichst wenige A4-Seiten verteilt.</div><div class="receipt-list">${state.receipts.length?state.receipts.map(r=>`<label class="receipt-row"><input type="checkbox" class="receiptCheck" value="${r.id}" onchange="updatePrintSummary()"><div><b>Bon ${r.id} · ${new Date(r.date).toLocaleString('de-DE')}</b><small>${r.items.length} Positionen · ${esc(r.store)} · ${r.payment==='card'?(r.paymentMethod||'Karte'):'Bar'}</small></div><strong>${euro(r.total)}</strong></label>`).join(''):'<div class="helper">Noch keine Bons vorhanden. Schließe zuerst einen Einkauf ab.</div>'}</div>`,`<button class="btn" onclick="closeModal()">Schließen</button><button class="btn green" onclick="printSelected()" ${state.receipts.length?'':'disabled'}>Ausgewählte Bons drucken</button>`,true);updatePrintSummary()}
 function selectedIds(){return [...document.querySelectorAll('.receiptCheck:checked')].map(x=>x.value)}
@@ -2047,8 +2122,24 @@ function openCreateProduct(prefillBarcode='',fromScan=false,draft=null){
       <div class="form-group"><label>Verkaufspreis €</label><input id="npPrice" inputmode="decimal" placeholder="1,49" value="${escAttr(d.price||'')}"></div>
       <div class="form-group"><label>Einkaufspreis €</label><input id="npCostPrice" inputmode="decimal" placeholder="0,99" value="${escAttr(d.costPrice||'')}"></div>
     </div>
-    <div class="form-group"><label>Einheit / Preisbasis</label><input id="npUnit" value="${escAttr(d.unit||'Stück')}" placeholder="z. B. Stück, 250 g, 1 kg"></div>
-    <div class="helper" style="margin:-4px 0 12px">Wenn du z. B. <b>250 g</b> einträgst, wird der Artikel automatisch zum Gewichtsartikel. 250 g = 1,49 € kann dann für jedes echte Gewicht berechnet werden.</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Verkaufsart</label>
+        <select id="npMeasureMode" onchange="updateCreateMeasureHelp()">
+          <option value="piece" ${(d.measureMode||'piece')==='piece'?'selected':''}>Stück / feste Einheit</option>
+          <option value="mass" ${d.measureMode==='mass'?'selected':''}>Gewicht – Preis pro kg</option>
+          <option value="volume" ${d.measureMode==='volume'?'selected':''}>Flüssigkeit – Preis pro Liter</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Einheit bei Stückartikel</label>
+        <input id="npUnit" value="${escAttr(d.unit||'Stück')}" placeholder="z. B. Stück, Set, Flasche">
+      </div>
+    </div>
+    <div id="npMeasureHelp" class="helper" style="margin:-4px 0 12px">
+      Bei Gewicht und Flüssigkeit trägst du <b>keine feste Produktmenge</b> ein.
+      Der Verkaufspreis oben gilt dann pro kg bzw. pro Liter. Die echte Menge wird erst beim Kassieren eingegeben.
+    </div>
     <div class="form-row">
       <div class="form-group">
         <label>Barcode</label>
@@ -2059,8 +2150,24 @@ function openCreateProduct(prefillBarcode='',fromScan=false,draft=null){
       </div>
       <div class="form-group"><label>Symbol</label><input id="npEmoji" value="${escAttr(d.emoji||'📦')}"></div>
     </div>
-    <label style="display:flex;gap:8px;align-items:center;font-size:11px"><input id="npWeighted" type="checkbox" ${d.weighted?'checked':''}> Manuell als Wiegeartikel markieren</label>
   `,`<button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn green" onclick="createProduct()">Artikel speichern</button>`);
+  setTimeout(updateCreateMeasureHelp,0);
+}
+
+
+function updateCreateMeasureHelp(){
+  const mode=document.getElementById('npMeasureMode')?.value||'piece';
+  const help=document.getElementById('npMeasureHelp');
+  const unit=document.getElementById('npUnit');
+  const priceLabel=document.querySelector('label[for="npPrice"]');
+  if(unit)unit.disabled=mode!=='piece';
+  if(help){
+    help.innerHTML=mode==='mass'
+      ?'Der Verkaufspreis gilt <b>pro kg</b>. Beim Kassieren gibst du erst das echte Gewicht in <b>g oder kg</b> ein.'
+      :mode==='volume'
+      ?'Der Verkaufspreis gilt <b>pro Liter</b>. Beim Kassieren gibst du erst die echte Menge in <b>ml oder L</b> ein.'
+      :'Der Artikel wird als feste Einheit verkauft, z. B. Stück, Set oder Flasche.';
+  }
 }
 
 function collectProductDraft(){
@@ -2070,9 +2177,9 @@ function collectProductDraft(){
     price:document.getElementById('npPrice')?.value||'',
     costPrice:document.getElementById('npCostPrice')?.value||'',
     unit:document.getElementById('npUnit')?.value||'Stück',
+    measureMode:document.getElementById('npMeasureMode')?.value||'piece',
     barcode:document.getElementById('npBarcode')?.value||'',
-    emoji:document.getElementById('npEmoji')?.value||'📦',
-    weighted:!!document.getElementById('npWeighted')?.checked
+    emoji:document.getElementById('npEmoji')?.value||'📦'
   };
 }
 
@@ -2096,12 +2203,14 @@ function createProduct(){
     id,name,cat:document.getElementById('npCat').value,price,
     costPrice:isFinite(costPrice)&&costPrice>=0?+costPrice.toFixed(2):+(price*.70).toFixed(2),
     unit:document.getElementById('npUnit').value||'Stück',
-    barcode,emoji:document.getElementById('npEmoji').value||'📦',
-    weighted:document.getElementById('npWeighted').checked
+    measureMode:document.getElementById('npMeasureMode')?.value||'piece',
+    barcode,emoji:document.getElementById('npEmoji').value||'📦'
   };
+  if(p.measureMode==='mass'){p.unit='kg';p.measurePricingVersion=2}
+  if(p.measureMode==='volume'){p.unit='L';p.measurePricingVersion=2}
   normalizeWeightedProduct(p);ensureProductBarcode(p);
   state.products.push(p);logActivity('Artikel erstellt',`${p.name} · ${p.barcode}`);save();closeModal();renderProducts();scanBeep('ok');
-  toast(p.weighted?'Gewichtsartikel erstellt – Preis wird automatisch berechnet':'Artikel erstellt','good');
+  toast(p.weighted?(p.weightUnit==='L'?'Flüssigkeitsartikel erstellt – Menge wird beim Kassieren eingegeben':'Wiegeartikel erstellt – Gewicht wird beim Kassieren eingegeben'):'Artikel erstellt','good');
   if(__createFromScan){__createFromScan=false;setTimeout(()=>addProduct(p.id),70)}
 }
 function editProduct(id){
@@ -2112,7 +2221,19 @@ function editProduct(id){
       <div class="form-group"><label>Verkaufspreis €</label><input id="epPrice" value="${String(p.price).replace('.',',')}"></div>
       <div class="form-group"><label>Einkaufspreis €</label><input id="epCostPrice" value="${String(p.costPrice??(p.price*.7)).replace('.',',')}"></div>
     </div>
-    <div class="form-row"><div class="form-group"><label>Barcode</label><input id="epBarcode" value="${escAttr(p.barcode)}"></div><div class="form-group"><label>Einheit</label><input id="epUnit" value="${escAttr(p.unit)}"></div></div>
+    <div class="form-row">
+      <div class="form-group"><label>Barcode</label><input id="epBarcode" value="${escAttr(p.barcode)}"></div>
+      <div class="form-group">
+        <label>Verkaufsart</label>
+        <select id="epMeasureMode">
+          <option value="piece" ${(!p.weighted||p.measureMode==='piece')?'selected':''}>Stück / feste Einheit</option>
+          <option value="mass" ${p.weightUnit==='kg'?'selected':''}>Gewicht – Preis pro kg</option>
+          <option value="volume" ${p.weightUnit==='L'?'selected':''}>Flüssigkeit – Preis pro Liter</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label>Einheit bei Stückartikel</label><input id="epUnit" value="${escAttr(p.weighted?'Stück':p.unit)}" placeholder="Stück, Set, Flasche"></div>
+    <div class="helper" style="margin:-4px 0 12px">Bei Gewicht/Flüssigkeit ist der Verkaufspreis oben der Preis pro kg/L. Die Kundenmenge wird erst an der Kasse eingegeben.</div>
     <div class="barcode-label">${barcodeSvg(p.barcode)}</div>
   `,`<button class="btn danger" onclick="deleteProduct(${id})">Löschen</button><button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn green" onclick="saveProduct(${id})">Speichern</button>`);
 }
@@ -2122,7 +2243,12 @@ function saveProduct(id){
   const cp=parseFloat((document.getElementById('epCostPrice').value||'').replace(',','.'));
   if(!isFinite(pr)||pr<0||!isFinite(cp)||cp<0)return toast('Ungültiger Verkaufs- oder Einkaufspreis','bad');
   p.name=document.getElementById('epName').value.trim()||p.name;p.price=pr;p.costPrice=cp;
-  p.barcode=document.getElementById('epBarcode').value.trim()||p.barcode;p.unit=document.getElementById('epUnit').value.trim()||p.unit;
+  p.barcode=document.getElementById('epBarcode').value.trim()||p.barcode;
+  p.measureMode=document.getElementById('epMeasureMode')?.value||'piece';
+  p.unit=document.getElementById('epUnit').value.trim()||'Stück';
+  p.measurePricingVersion=(p.measureMode==='mass'||p.measureMode==='volume')?2:undefined;
+  if(p.measureMode==='mass')p.unit='kg';
+  if(p.measureMode==='volume')p.unit='L';
   normalizeWeightedProduct(p);ensureProductBarcode(p);logActivity('Artikel geändert',p.name);save();closeModal();renderProducts();
 }
 function deleteProduct(id){state.products=state.products.filter(p=>p.id!==id);save();closeModal();renderProducts();toast('Artikel gelöscht')}
