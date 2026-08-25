@@ -146,6 +146,144 @@
 
   @media(max-width:850px){main{display:block}.catalog{border-right:0}.cart-pane{position:relative;top:auto;height:auto;min-height:550px}.product-row,.product-row.preview-row{grid-template-columns:repeat(2,1fr)}.search-row{grid-template-columns:1fr}.brand{min-width:0}.top-actions{margin-left:auto}.stats{gap:14px}.mini-actions{width:100%;justify-content:flex-start}.form-row{grid-template-columns:1fr}.coupon-grid{grid-template-columns:1fr}}
   @media(max-width:500px){.topbar,.stats,.catalog{padding-left:11px;padding-right:11px}.product-row,.product-row.preview-row{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.cat-group{display:block}.cat-group-label{width:auto;margin-bottom:5px}.cat-group-buttons{gap:5px}.pic{height:88px}.prod-body{padding:8px}.product .prod-name{font-size:11px}.top-actions .btn:not(.soft){display:none}.notice{font-size:10px}.modal-body,.modal-head,.modal-foot{padding-left:14px;padding-right:14px}}
+
+  /* ===== Handy / iPad / Tablet ===== */
+  .cart-mobile-close,.mobile-cart-bar,.mobile-cart-backdrop{display:none}
+
+  @media (max-width:1024px){
+    html,body{min-height:100%;height:auto}
+    body{padding-bottom:76px}
+    header{position:sticky;top:0}
+    .topbar{
+      height:auto;min-height:58px;padding:8px 12px;gap:8px;
+      display:grid;grid-template-columns:auto 1fr;align-items:center
+    }
+    .brand{min-width:0}
+    .brand .logo{width:34px;height:34px;padding:7px}
+    .brand b{font-size:14px}
+    .brand small{max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .notice{display:none}
+    .top-actions{
+      min-width:0;margin-left:0;display:flex;gap:6px;
+      overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;
+      scrollbar-width:none;padding-bottom:2px
+    }
+    .top-actions::-webkit-scrollbar,.mini-actions::-webkit-scrollbar,.stats::-webkit-scrollbar{display:none}
+    .top-actions .btn,.top-actions .role-badge{flex:0 0 auto;white-space:nowrap}
+    .top-actions .btn{display:inline-flex!important;min-height:38px;align-items:center}
+    .stats{
+      height:auto;min-height:56px;padding:7px 12px;gap:9px;
+      flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch
+    }
+    .stat{flex:0 0 auto}
+    .stats-spacer{display:none}
+    .mini-actions{
+      flex:0 0 auto;width:auto;display:flex;flex-wrap:nowrap;
+      overflow-x:auto;gap:6px
+    }
+    .mini-actions>*{flex:0 0 auto;white-space:nowrap}
+    main{display:block!important;min-height:0}
+    .catalog{border-right:0;padding:12px 12px 24px;min-width:0}
+    .search-row{grid-template-columns:1fr!important;gap:8px}
+    .field{min-height:44px}
+    .field input{font-size:16px} /* verhindert iPhone-Zoom beim Tippen */
+    .barcode-wrap{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto}
+    .barcode-wrap input{min-width:0}
+    .cats{overflow:hidden}
+    .cat-group{display:block;margin-bottom:9px}
+    .cat-group-label{width:auto;margin:0 0 5px}
+    .cat-group-buttons{
+      flex-wrap:nowrap!important;overflow-x:auto;-webkit-overflow-scrolling:touch;
+      scrollbar-width:none;padding-bottom:3px
+    }
+    .cat-group-buttons::-webkit-scrollbar{display:none}
+    .cat{flex:0 0 auto;min-height:38px;padding:8px 12px}
+    .section-head{gap:6px;flex-wrap:wrap}
+    .section-head .btn{margin-left:auto;min-height:40px}
+    .category-section-head{flex-wrap:wrap}
+    .category-section-head button{margin-left:auto}
+    .product-row,.product-row.preview-row{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+    .product{touch-action:manipulation}
+    .pic{height:132px}
+    .prod-body{padding:9px}
+    .prod-name{font-size:12px}
+    .icon-btn,.smallbtn,.qty button{min-width:38px;min-height:38px}
+    .barcode-label{display:none} /* auf Touch-Geräten mehr Platz fürs Produkt */
+    .prod-tap{font-size:9px}
+
+    .cart-pane{
+      display:flex!important;
+      position:fixed!important;z-index:90;top:0!important;right:0;bottom:0;left:auto;
+      width:min(440px,96vw)!important;height:100dvh!important;min-height:0!important;
+      border-left:1px solid var(--line);background:#fff;
+      transform:translateX(105%);transition:transform .22s ease;
+      box-shadow:-18px 0 45px rgba(12,35,58,.20)
+    }
+    .cart-pane.mobile-open{transform:translateX(0)}
+    .cart-head{padding-top:max(14px,env(safe-area-inset-top));position:relative}
+    .cart-mobile-close{
+      display:grid;place-items:center;margin-left:auto;width:42px;height:42px;
+      border:1px solid var(--line);border-radius:12px;background:#f6f8fb;color:#10253c
+    }
+    .cart-items{overscroll-behavior:contain}
+    .totals{padding-bottom:max(14px,env(safe-area-inset-bottom))}
+    .mobile-cart-backdrop{
+      position:fixed;z-index:85;inset:0;background:rgba(5,20,34,.44);
+      backdrop-filter:blur(2px)
+    }
+    .mobile-cart-backdrop.show{display:block}
+    .mobile-cart-bar{
+      display:flex;align-items:center;gap:10px;position:fixed;z-index:70;
+      left:10px;right:10px;bottom:max(8px,env(safe-area-inset-bottom));
+      height:60px;border:0;border-radius:16px;padding:8px 13px;
+      background:#10253c;color:#fff;box-shadow:0 10px 30px rgba(5,25,44,.28);
+      text-align:left
+    }
+    .mobile-cart-icon{font-size:22px}
+    .mobile-cart-copy{display:flex;flex-direction:column;line-height:1.05}
+    .mobile-cart-copy b{font-size:13px}.mobile-cart-copy small{font-size:10px;opacity:.7;margin-top:4px}
+    .mobile-cart-bar strong{margin-left:auto;font-size:16px}
+    .mobile-cart-arrow{font-size:18px;opacity:.85}
+    body.mobile-cart-open{overflow:hidden}
+    .modal-backdrop{padding:10px}
+    .modal{max-height:94dvh}
+    .modal-head,.modal-body,.modal-foot{padding-left:14px;padding-right:14px}
+    .modal-foot{padding-bottom:max(12px,env(safe-area-inset-bottom))}
+    .form-row{grid-template-columns:1fr!important}
+    .form-group input,.form-group select{min-height:44px;font-size:16px}
+    .login-screen,.store-screen{padding:14px}
+    .login-card,.store-card{width:min(100%,620px)}
+  }
+
+  @media (max-width:720px){
+    .topbar{grid-template-columns:1fr}
+    .top-actions{width:100%}
+    .stats{padding-left:10px;padding-right:10px}
+    .product-row,.product-row.preview-row{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px}
+    .pic{height:112px}
+    .category-section{margin-bottom:17px}
+    .category-section-head h3{font-size:14px}
+    .category-section-head .count{order:2}
+    .category-section-head button{width:100%;margin:2px 0 0}
+    .barcode-wrap{grid-template-columns:auto minmax(0,1fr) auto}
+    .barcode-wrap .btn.green{grid-column:1/-1;width:100%;min-height:44px}
+    .section-head h2{font-size:17px}
+    .store-grid{grid-template-columns:1fr!important}
+  }
+
+  @media (max-width:430px){
+    .catalog{padding-left:8px;padding-right:8px}
+    .product-row,.product-row.preview-row{gap:6px}
+    .pic{height:96px}
+    .prod-body{padding:7px}
+    .prod-name{font-size:11px}
+    .prod-meta{font-size:8px}
+    .price{font-size:13px}
+    .weight-chip{font-size:8px}
+    .mobile-cart-bar{left:7px;right:7px}
+    .login-card{padding:18px!important}
+  }
+
 </style>
 </head>
 <body>
@@ -156,7 +294,7 @@
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
     <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
-    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: PRODUKTE-FIX-20-36</div>
+    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: PRODUKTE-MOBILE-FIX-21-04</div>
     <div class="register-actions">
       <button class="btn" onclick="openCompanyRegistration()">＋ Firmenkonto eröffnen</button>
       <button class="btn" onclick="openEmployeeRegistration()">＋ Mitarbeiterkonto selbst erstellen</button>
@@ -229,7 +367,7 @@
     <div id="products" class="products"></div>
   </section>
   <aside class="cart-pane">
-    <div class="cart-head"><h2>Aktueller Einkauf</h2><small><span id="cartCount">0</span> Artikel</small></div>
+    <div class="cart-head"><h2>Aktueller Einkauf</h2><small><span id="cartCount">0</span> Artikel</small><button class="cart-mobile-close" type="button" onclick="toggleMobileCart(false)" aria-label="Warenkorb schließen">✕</button></div>
     <div id="couponStrip" class="coupon-strip hidden"></div>
     <div id="cartItems" class="cart-items"></div>
     <div class="totals">
@@ -241,6 +379,15 @@
     </div>
   </aside>
 </main>
+
+<div id="mobileCartBackdrop" class="mobile-cart-backdrop" onclick="toggleMobileCart(false)"></div>
+<button id="mobileCartBar" class="mobile-cart-bar" type="button" onclick="toggleMobileCart(true)">
+  <span class="mobile-cart-icon">🛒</span>
+  <span class="mobile-cart-copy"><b>Warenkorb</b><small><span id="mobileCartCount">0</span> Artikel</small></span>
+  <strong id="mobileCartTotal">0,00 €</strong>
+  <span class="mobile-cart-arrow">↑</span>
+</button>
+
 </div>
 <div class="toast-wrap" id="toasts"></div>
 <div id="modalRoot"></div>
@@ -1235,9 +1382,34 @@ function renderCategories(){
     </div>`).join('');
 }
 
+
+function productFallbackImage(p){
+  const icon=String(p?.emoji||CAT_FACTORY[p?.cat]?.emoji||'🛒');
+  const name=String(p?.name||'Produkt').slice(0,34);
+  const cat=String(p?.cat||'Artikel').slice(0,28);
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420">
+    <defs>
+      <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+        <stop offset="0" stop-color="#f8fbfd"/>
+        <stop offset="1" stop-color="#dfe9ef"/>
+      </linearGradient>
+    </defs>
+    <rect width="640" height="420" rx="24" fill="url(#g)"/>
+    <circle cx="320" cy="160" r="92" fill="#ffffff" opacity=".9"/>
+    <text x="320" y="195" text-anchor="middle" font-size="86">${icon}</text>
+    <text x="320" y="300" text-anchor="middle" font-family="Arial,sans-serif" font-weight="700" font-size="28" fill="#10253c">${name.replace(/[&<>]/g,'')}</text>
+    <text x="320" y="338" text-anchor="middle" font-family="Arial,sans-serif" font-size="19" fill="#738397">${cat.replace(/[&<>]/g,'')}</text>
+  </svg>`;
+  return 'data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(svg);
+}
+function realPhotoUrl(p){
+  if(p && typeof p.image==='string' && p.image.trim()) return p.image.trim();
+  return productFallbackImage(p);
+}
+
 function productCard(p){
   return `<article class="product" role="button" tabindex="0" onclick="addProduct(${p.id})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();addProduct(${p.id})}">
-    <div class="pic"><img loading="lazy" decoding="async" src="${escAttr(realPhotoUrl(p))}" alt="${escAttr(p.name)}"></div>
+    <div class="pic"><img loading="lazy" decoding="async" src="${escAttr(realPhotoUrl(p))}" alt="${escAttr(p.name)}" onerror="this.onerror=null;this.src=productFallbackImage(state.products.find(x=>x.id===${p.id})||{name:'Produkt',emoji:'🛒'})"></div>
     <div class="prod-body">
       <div class="prod-name" title="${esc(p.name)}">${esc(p.name)}</div>
       <div class="prod-meta">${esc(p.unit||'Stück')} · #${esc(p.barcode)}</div>
@@ -1322,6 +1494,20 @@ function calcSubtotal(){return state.cart.reduce((s,x)=>s+(Number(x.linePrice)||
 function couponAmount(){if(!state.activeCoupon)return 0;const c=state.activeCoupon,sub=calcSubtotal();if(sub<(c.min||0))return 0;return Math.min(sub,c.type==='percent'?sub*c.value/100:c.value)}
 function total(){return Math.max(0,calcSubtotal()-couponAmount())}
 function vat(){return total()*19/119}
+
+function toggleMobileCart(open){
+  const pane=document.querySelector('.cart-pane');
+  const back=document.getElementById('mobileCartBackdrop');
+  if(!pane||!back)return;
+  const shouldOpen=typeof open==='boolean'?open:!pane.classList.contains('mobile-open');
+  pane.classList.toggle('mobile-open',shouldOpen);
+  back.classList.toggle('show',shouldOpen);
+  document.body.classList.toggle('mobile-cart-open',shouldOpen);
+}
+window.addEventListener('resize',()=>{
+  if(window.innerWidth>1024)toggleMobileCart(false);
+});
+
 function renderCart(){
   document.getElementById('cartCount').textContent=state.cart.length;
   const root=document.getElementById('cartItems');
@@ -1332,7 +1518,12 @@ function renderCart(){
   }
   const cp=document.getElementById('couponStrip');
   if(state.activeCoupon){cp.classList.remove('hidden');cp.innerHTML=`🎟 <div><b>${esc(state.activeCoupon.label)}</b><br><span>Code ${esc(state.activeCoupon.code)} · −${euro(couponAmount())}</span></div><button onclick="removeCoupon()">✕</button>`}else cp.classList.add('hidden');
-  document.getElementById('subtotal').textContent=euro(calcSubtotal());document.getElementById('discount').textContent='− '+euro(couponAmount());document.getElementById('vat').textContent=euro(vat());document.getElementById('total').textContent=euro(total());document.getElementById('payCard').disabled=!state.cart.length;document.getElementById('payCash').disabled=!state.cart.length
+  document.getElementById('subtotal').textContent=euro(calcSubtotal());document.getElementById('discount').textContent='− '+euro(couponAmount());document.getElementById('vat').textContent=euro(vat());document.getElementById('total').textContent=euro(total());document.getElementById('payCard').disabled=!state.cart.length;document.getElementById('payCash').disabled=!state.cart.length;
+  const mobileCount=document.getElementById('mobileCartCount');
+  const mobileTotal=document.getElementById('mobileCartTotal');
+  if(mobileCount)mobileCount.textContent=state.cart.reduce((s,x)=>s+(x.weighted?1:(Number(x.qty)||1)),0);
+  if(mobileTotal)mobileTotal.textContent=euro(total());
+
 }
 function applyInlineWeight(id){
   const x=state.cart.find(i=>i.lineId===id),el=document.getElementById(`inlineWeight_${id}`);if(!x||!el)return;
