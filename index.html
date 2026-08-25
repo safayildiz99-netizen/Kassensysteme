@@ -292,7 +292,7 @@
 .scan-main-btn:before{content:"";width:7px;height:7px;border-radius:50%;background:#fff;box-shadow:0 0 10px #fff}
 
 
-.auto-image-pending{filter:saturate(.85);transition:opacity .18s ease,filter .18s ease}
+.auto-image-pending{transition:opacity .18s ease,filter .18s ease}
 .pic img{background:#edf3f6}
 
 </style>
@@ -305,7 +305,7 @@
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
     <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
-    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: BLITZSCAN-ALLE-BILDER-21-26</div>
+    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: ALLE-PRODUKTBILDER-21-32</div>
     <div class="register-actions">
       <button class="btn" onclick="openCompanyRegistration()">＋ Firmenkonto eröffnen</button>
       <button class="btn" onclick="openEmployeeRegistration()">＋ Mitarbeiterkonto selbst erstellen</button>
@@ -1532,6 +1532,79 @@ function initAutoProductImages(){
   }
 }
 
+
+function seedPhoto(name){
+  const p=baseProducts.find(x=>x.name===name && x.image);
+  return p?.image||'';
+}
+function stableHash(text){
+  let h=0;
+  for(let i=0;i<String(text).length;i++) h=((h<<5)-h)+String(text).charCodeAt(i),h|=0;
+  return Math.abs(h);
+}
+function categoryPhotoFallback(p){
+  const n=String(p?.name||'').toLowerCase();
+  const cat=String(p?.cat||'');
+
+  if(cat==='Kühlregal'){
+    if(/käse|gouda|emmental|feta|mozzarella|cheddar/.test(n)) return seedPhoto('Gouda Käse');
+    if(/butter|margarine/.test(n)) return seedPhoto('Butter');
+    if(/joghurt|yoghurt|skyr|quark|kefir|ayran/.test(n)) return seedPhoto('Naturjoghurt');
+    return seedPhoto('Vollmilch');
+  }
+  if(cat==='Obst & Gemüse'){
+    if(/banan/.test(n)) return seedPhoto('Bananen');
+    if(/gurk|zucchini/.test(n)) return seedPhoto('Gurke');
+    if(/tomat|paprika|chili|peperoni/.test(n)) return seedPhoto('Tomaten');
+    const opts=['Äpfel','Bananen','Tomaten','Gurke'];
+    return seedPhoto(opts[stableHash(n)%opts.length]);
+  }
+  if(cat==='Backwaren'){
+    if(/croissant|hörnchen|plunder|donut|muffin/.test(n)) return seedPhoto('Croissant');
+    return seedPhoto('Bauernbrot');
+  }
+  if(cat==='Getränke'){
+    if(/cola|limonade|energy|brause/.test(n)) return seedPhoto('Cola');
+    if(/saft|orange|apfel|multivitamin|nektar/.test(n)) return seedPhoto('Orangensaft');
+    return seedPhoto('Mineralwasser');
+  }
+  if(cat==='Vorrat'){
+    if(/nudel|pasta|spaghetti|penne|fusilli|makkaroni/.test(n)) return seedPhoto('Nudeln');
+    return seedPhoto('Reis');
+  }
+  if(cat==='Süßes') return seedPhoto('Schokolade');
+  if(cat==='Kraftstoff') return /diesel/.test(n)?seedPhoto('Diesel'):seedPhoto('Super E10');
+  if(cat==='Autozubehör') return seedPhoto('Motoröl 5W-30');
+  if(cat==='Waschanlage') return seedPhoto('Premium Autowäsche');
+  if(cat==='Bauen') return seedPhoto('Bausteine-Set');
+  if(cat==='Plüschtiere') return seedPhoto('Teddybär');
+  if(cat==='Spiele'){
+    if(/auto|fahrzeug|renn|ferngesteuert/.test(n)) return seedPhoto('Ferngesteuertes Auto');
+    return seedPhoto('Puzzle 1000 Teile');
+  }
+  if(cat==='Bankservice'){
+    if(/überweisung/.test(n)) return seedPhoto('Überweisung');
+    if(/konto/.test(n)) return seedPhoto('Kontoeröffnung');
+    if(/schließ|safe|fach/.test(n)) return seedPhoto('Schließfach');
+    return seedPhoto('Bargeldabhebung');
+  }
+  if(cat==='Wohnzimmer'){
+    if(/stuhl|sessel/.test(n)) return seedPhoto('Esszimmerstuhl');
+    if(/tisch/.test(n)) return seedPhoto('Esstisch');
+    if(/lampe|leuchte/.test(n)) return seedPhoto('Stehlampe');
+    return seedPhoto('Wohnsofa');
+  }
+  if(cat==='Fahrzeuge'){
+    if(/motorrad|roller|scooter/.test(n)) return seedPhoto('Motorrad');
+    if(/fahrrad|bike|e-bike/.test(n)) return seedPhoto('E-Bike');
+    if(/suv|gelände|pickup|van/.test(n)) return seedPhoto('SUV');
+    return seedPhoto('Kompaktwagen');
+  }
+
+  const all=baseProducts.filter(x=>x.image);
+  return all.length?all[stableHash(n)%all.length].image:'';
+}
+
 function productFallbackImage(p){
   const icon=String(p?.emoji||CAT_FACTORY[p?.cat]?.emoji||'🛒');
   const name=String(p?.name||'Produkt').slice(0,34);
@@ -1553,7 +1626,7 @@ function productFallbackImage(p){
 }
 function realPhotoUrl(p){
   if(p && typeof p.image==='string' && p.image.trim()) return p.image.trim();
-  return productFallbackImage(p);
+  return categoryPhotoFallback(p) || productFallbackImage(p);
 }
 
 function productCard(p){
@@ -1562,7 +1635,7 @@ function productCard(p){
       ${p.image?'':'data-auto-product-image="1" data-product-id="'+p.id+'"'}
       class="${p.image?'':'auto-image-pending'}"
       src="${escAttr(realPhotoUrl(p))}" alt="${escAttr(p.name)}"
-      onerror="this.onerror=null;this.src=productFallbackImage(state.products.find(x=>x.id===${p.id})||{name:'Produkt',emoji:'🛒'})"></div>
+      onerror="this.onerror=null;this.src=categoryPhotoFallback(state.products.find(x=>x.id===${p.id})||{})||productFallbackImage(state.products.find(x=>x.id===${p.id})||{name:'Produkt',emoji:'🛒'})"></div>
     <div class="prod-body">
       <div class="prod-name" title="${esc(p.name)}">${esc(p.name)}</div>
       <div class="prod-meta">${esc(p.unit||'Stück')} · #${esc(p.barcode)}</div>
