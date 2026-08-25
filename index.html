@@ -44,8 +44,8 @@
 .scan-frame:after{right:-2px;top:-2px;border-width:4px 4px 0 0;border-radius:0 13px 0 0}
 .scan-corner:before{left:-2px;bottom:-2px;border-width:0 0 4px 4px;border-radius:0 0 0 13px}
 .scan-corner:after{right:-2px;bottom:-2px;border-width:0 4px 4px 0;border-radius:0 0 13px 0}
-.scan-line{position:absolute;left:10%;right:10%;top:50%;height:2px;background:#55e8b1;box-shadow:0 0 14px rgba(85,232,177,.95);animation:scanMove 2.2s ease-in-out infinite}
-@keyframes scanMove{0%,100%{transform:translateY(-62px);opacity:.6}50%{transform:translateY(62px);opacity:1}}
+.scan-line{position:absolute;left:10%;right:10%;top:50%;height:2px;background:#55e8b1;box-shadow:0 0 14px rgba(85,232,177,.95);animation:scanMove .9s ease-in-out infinite}
+@keyframes scanMove{0%,100%{transform:translateY(-62px);opacity:.65}50%{transform:translateY(62px);opacity:1}}
 .scan-center-btn{position:absolute;left:50%;bottom:11%;transform:translateX(-50%);border:0;background:#fff;color:#10223b;border-radius:999px;padding:12px 22px;font-weight:900;box-shadow:0 10px 25px rgba(0,0,0,.22);cursor:pointer}
 .scan-hint{position:absolute;left:50%;bottom:3%;transform:translateX(-50%);background:rgba(5,15,25,.82);color:#fff;border-radius:999px;padding:7px 12px;font-size:10px;white-space:nowrap}
 .scan-kicker{color:#0d9667;font-weight:900;letter-spacing:.18em;font-size:10px;margin-bottom:10px}
@@ -284,6 +284,17 @@
     .login-card{padding:18px!important}
   }
 
+
+.scan-main-btn{
+  box-shadow:0 0 0 1px rgba(17,184,126,.08),0 5px 18px rgba(17,184,126,.16);
+  font-weight:900;
+}
+.scan-main-btn:before{content:"";width:7px;height:7px;border-radius:50%;background:#fff;box-shadow:0 0 10px #fff}
+
+
+.auto-image-pending{filter:saturate(.85);transition:opacity .18s ease,filter .18s ease}
+.pic img{background:#edf3f6}
+
 </style>
 </head>
 <body>
@@ -294,7 +305,7 @@
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
     <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
-    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: PRODUKTE-MOBILE-FIX-21-04</div>
+    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: BLITZSCAN-ALLE-BILDER-21-26</div>
     <div class="register-actions">
       <button class="btn" onclick="openCompanyRegistration()">＋ Firmenkonto eröffnen</button>
       <button class="btn" onclick="openEmployeeRegistration()">＋ Mitarbeiterkonto selbst erstellen</button>
@@ -360,7 +371,7 @@
   <section class="catalog">
     <div class="search-row">
       <div class="field"><span>⌕</span><input id="search" placeholder="Produkt suchen …" oninput="renderProducts()"></div>
-      <div class="field barcode-wrap"><span>▥</span><input id="barcodeInput" placeholder="Barcode oder Coupon-Code" onkeydown="if(event.key==='Enter')processCode()"><button class="btn primary" onclick="processCode()">Eingeben</button><button class="btn green" onclick="openScanner()">▥ Kamera-Scan</button></div>
+      <div class="field barcode-wrap"><span>▥</span><input id="barcodeInput" placeholder="Barcode oder Coupon-Code" onkeydown="if(event.key==='Enter')processCode()"><button class="btn primary" onclick="processCode()">Eingeben</button><button class="btn green scan-main-btn" onclick="openScanner()">⚡ Produkt-Scan</button></div>
     </div>
     <div id="categories" class="cats"></div>
     <div class="section-head"><h2>Produkte</h2><span class="badge" id="productCount"></span><button class="btn soft" onclick="openCreateProduct()">＋ Artikel erstellen</button></div>
@@ -1383,6 +1394,144 @@ function renderCategories(){
 }
 
 
+
+const KS_IMG_CACHE_KEY='kassenspiel-product-image-cache-v2';
+let ksImageCache={};
+try{ksImageCache=JSON.parse(localStorage.getItem(KS_IMG_CACHE_KEY)||'{}')||{}}catch(e){ksImageCache={}}
+const ksImageQueue=[];
+const ksImageQueued=new Set();
+let ksImageWorkers=0;
+const KS_IMAGE_WORKERS=4;
+
+function productImageSearchQuery(p){
+  const cat=String(p?.cat||'');
+  let hint='';
+  if(cat==='Kühlregal') hint=' Lebensmittel Milchprodukt';
+  else if(cat==='Obst & Gemüse') hint=' Obst Gemüse Lebensmittel';
+  else if(cat==='Backwaren') hint=' Brot Backware Lebensmittel';
+  else if(cat==='Getränke') hint=' Getränk Flasche Lebensmittel';
+  else if(cat==='Vorrat') hint=' Lebensmittel Packung';
+  else if(cat==='Süßes') hint=' Süßigkeit Lebensmittel';
+  else if(cat==='Kraftstoff') hint=' Tankstelle Kraftstoff';
+  else if(cat==='Autozubehör') hint=' Auto Zubehör Produkt';
+  else if(cat==='Waschanlage') hint=' Autowäsche Waschanlage';
+  else if(cat==='Bauen') hint=' Spielzeug Bausteine';
+  else if(cat==='Plüschtiere') hint=' Plüschtier';
+  else if(cat==='Spiele') hint=' Brettspiel Spielzeug';
+  else if(cat==='Fahrzeuge') hint=' Fahrzeug Auto';
+  else if(cat==='Bankservice') hint=' Bank Geld';
+  else if(cat==='Wohnzimmer') hint=' Möbel Wohnzimmer';
+  return `${String(p?.name||'Produkt')}${hint}`;
+}
+
+async function findCommonsProductImage(p){
+  const key=String(p.id||p.barcode||p.name);
+  if(ksImageCache[key]) return ksImageCache[key];
+
+  const search=productImageSearchQuery(p);
+  const url='https://commons.wikimedia.org/w/api.php?action=query'
+    +'&generator=search'
+    +'&gsrnamespace=6'
+    +'&gsrlimit=8'
+    +'&gsrsearch='+encodeURIComponent(search)
+    +'&prop=imageinfo'
+    +'&iiprop=url|mime'
+    +'&iiurlwidth=720'
+    +'&format=json'
+    +'&origin=*';
+
+  try{
+    const r=await fetch(url,{mode:'cors',cache:'force-cache'});
+    if(!r.ok) throw new Error('Bildsuche '+r.status);
+    const data=await r.json();
+    const pages=Object.values(data?.query?.pages||{});
+    const candidates=pages.map(pg=>{
+      const ii=pg?.imageinfo?.[0];
+      return {
+        title:String(pg?.title||''),
+        url:ii?.thumburl||ii?.url||'',
+        mime:String(ii?.mime||'')
+      };
+    }).filter(x=>x.url && /^image\/(jpeg|png|webp)/i.test(x.mime));
+
+    // Kleine Relevanzwertung: Produktbegriffe im Dateinamen bevorzugen.
+    const words=String(p.name||'').toLowerCase().split(/[\s\-\/]+/).filter(w=>w.length>2);
+    candidates.sort((a,b)=>{
+      const A=a.title.toLowerCase(),B=b.title.toLowerCase();
+      const sa=words.reduce((s,w)=>s+(A.includes(w)?2:0),0);
+      const sb=words.reduce((s,w)=>s+(B.includes(w)?2:0),0);
+      return sb-sa;
+    });
+
+    const found=candidates[0]?.url||'';
+    if(found){
+      ksImageCache[key]=found;
+      try{localStorage.setItem(KS_IMG_CACHE_KEY,JSON.stringify(ksImageCache))}catch(e){}
+      return found;
+    }
+  }catch(e){}
+  return '';
+}
+
+function enqueueProductImage(p,img){
+  if(!p||!img||p.image||ksImageQueued.has(String(p.id)))return;
+  const key=String(p.id);
+  const cached=ksImageCache[key];
+  if(cached){
+    img.src=cached;
+    return;
+  }
+  ksImageQueued.add(key);
+  ksImageQueue.push({p,img});
+  pumpProductImageQueue();
+}
+
+async function pumpProductImageQueue(){
+  while(ksImageWorkers<KS_IMAGE_WORKERS && ksImageQueue.length){
+    const job=ksImageQueue.shift();
+    if(!job)break;
+    ksImageWorkers++;
+    (async()=>{
+      try{
+        const url=await findCommonsProductImage(job.p);
+        if(url && document.body.contains(job.img)){
+          job.img.src=url;
+          job.img.classList.remove('auto-image-pending');
+        }
+      }finally{
+        ksImageWorkers--;
+        ksImageQueued.delete(String(job.p.id));
+        pumpProductImageQueue();
+      }
+    })();
+  }
+}
+
+let ksProductImageObserver=null;
+function initAutoProductImages(){
+  const imgs=[...document.querySelectorAll('img[data-auto-product-image="1"]')];
+  if(!imgs.length)return;
+  if('IntersectionObserver' in window){
+    if(!ksProductImageObserver){
+      ksProductImageObserver=new IntersectionObserver(entries=>{
+        entries.forEach(entry=>{
+          if(!entry.isIntersecting)return;
+          const img=entry.target;
+          ksProductImageObserver.unobserve(img);
+          const p=state.products.find(x=>String(x.id)===String(img.dataset.productId));
+          if(p)enqueueProductImage(p,img);
+        });
+      },{rootMargin:'600px 0px'});
+    }
+    imgs.forEach(img=>ksProductImageObserver.observe(img));
+  }else{
+    imgs.forEach(img=>{
+      const p=state.products.find(x=>String(x.id)===String(img.dataset.productId));
+      if(p)enqueueProductImage(p,img);
+    });
+  }
+}
+
 function productFallbackImage(p){
   const icon=String(p?.emoji||CAT_FACTORY[p?.cat]?.emoji||'🛒');
   const name=String(p?.name||'Produkt').slice(0,34);
@@ -1409,7 +1558,11 @@ function realPhotoUrl(p){
 
 function productCard(p){
   return `<article class="product" role="button" tabindex="0" onclick="addProduct(${p.id})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();addProduct(${p.id})}">
-    <div class="pic"><img loading="lazy" decoding="async" src="${escAttr(realPhotoUrl(p))}" alt="${escAttr(p.name)}" onerror="this.onerror=null;this.src=productFallbackImage(state.products.find(x=>x.id===${p.id})||{name:'Produkt',emoji:'🛒'})"></div>
+    <div class="pic"><img loading="lazy" decoding="async"
+      ${p.image?'':'data-auto-product-image="1" data-product-id="'+p.id+'"'}
+      class="${p.image?'':'auto-image-pending'}"
+      src="${escAttr(realPhotoUrl(p))}" alt="${escAttr(p.name)}"
+      onerror="this.onerror=null;this.src=productFallbackImage(state.products.find(x=>x.id===${p.id})||{name:'Produkt',emoji:'🛒'})"></div>
     <div class="prod-body">
       <div class="prod-name" title="${esc(p.name)}">${esc(p.name)}</div>
       <div class="prod-meta">${esc(p.unit||'Stück')} · #${esc(p.barcode)}</div>
@@ -1433,6 +1586,7 @@ function renderProducts(){
       <div class="category-section-head"><h3>${esc(state.category)}</h3><span class="count">${list.length} Produkte</span><button class="btn" onclick="setCategory('Alle')">← Alle Kategorien</button></div>
       <div class="product-row">${list.map(productCard).join('')}</div>
     </section>` || '<div class="category-empty">Keine Produkte gefunden.</div>';
+    setTimeout(initAutoProductImages,0);
     return;
   }
 
@@ -1507,6 +1661,14 @@ function toggleMobileCart(open){
 window.addEventListener('resize',()=>{
   if(window.innerWidth>1024)toggleMobileCart(false);
 });
+
+
+const __ksOriginalRenderProducts=renderProducts;
+renderProducts=function(){
+  const out=__ksOriginalRenderProducts.apply(this,arguments);
+  setTimeout(initAutoProductImages,0);
+  return out;
+};
 
 function renderCart(){
   document.getElementById('cartCount').textContent=state.cart.length;
@@ -1656,7 +1818,7 @@ function openCreateProduct(prefillBarcode='',fromScan=false,draft=null){
         <label>Barcode</label>
         <div style="display:flex;gap:7px">
           <input id="npBarcode" value="${escAttr(barcode)}">
-          <button class="btn primary" type="button" onclick="scanBarcodeForCreate()">▥ Scannen</button>
+          <button class="btn primary" type="button" onclick="scanBarcodeForCreate()">⚡ Produkt-Scan</button>
         </div>
       </div>
       <div class="form-group"><label>Symbol</label><input id="npEmoji" value="${escAttr(d.emoji||'📦')}"></div>
@@ -1704,7 +1866,7 @@ function createProduct(){
   normalizeWeightedProduct(p);ensureProductBarcode(p);
   state.products.push(p);logActivity('Artikel erstellt',`${p.name} · ${p.barcode}`);save();closeModal();renderProducts();scanBeep('ok');
   toast(p.weighted?'Gewichtsartikel erstellt – Preis wird automatisch berechnet':'Artikel erstellt','good');
-  if(__createFromScan){__createFromScan=false;setTimeout(()=>addProduct(p.id),120)}
+  if(__createFromScan){__createFromScan=false;setTimeout(()=>addProduct(p.id),70)}
 }
 function editProduct(id){
   const p=state.products.find(x=>x.id===id);
@@ -1742,7 +1904,7 @@ function openScanner(mode='checkout',draft=null){
   const createMode=scanMode==='create';
   modal('Kamera-Scanner',`
     <div class="scan-kicker">KAMERA-BARCODE-SCANNER</div>
-    <div class="scan-fast-badge">⚡ SCHNELLSCAN AKTIV · Scanner bleibt offen</div>
+    <div class="scan-fast-badge">⚡ BLITZ-SCAN AKTIV · sofort erkennen · Scanner bleibt offen</div>
     <h2 class="scan-title">${createMode?'Barcode für neuen Artikel scannen':'Produkt scannen'}</h2>
     <div class="scan-lead">${createMode?'Halte den Barcode des neuen Produkts in den grünen Rahmen. Der Code wird direkt in das Artikel-Formular übernommen.':'Halte den Produktbarcode kurz in den grünen Rahmen. Der Artikel wird sofort kassiert und du kannst direkt den nächsten Barcode scannen.'}</div>
     <div class="scan-shell">
@@ -1867,7 +2029,7 @@ function flashScanner(){
   const f=document.getElementById('scanFlash');
   if(!f)return;
   f.classList.add('on');
-  setTimeout(()=>f.classList.remove('on'),100);
+  setTimeout(()=>f.classList.remove('on'),70);
 }
 
 function showUnknownScan(val){
@@ -1974,7 +2136,7 @@ async function startScanner(){
     if('BarcodeDetector' in window){
       scanDetector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','itf','upc_a','upc_e','qr_code']});
       scannerStatus('⚡ Schnellscan aktiv – Barcode wird laufend gesucht …');
-      scanTimer=setInterval(()=>detectFastFrame(),120);
+      scanTimer=setInterval(()=>detectFastFrame(),70);
     }else{
       scannerStatus('Dieser Browser unterstützt BarcodeDetector nicht. Nutze die manuelle Eingabe.');
     }
