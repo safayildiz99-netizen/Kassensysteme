@@ -1,0 +1,9 @@
+{
+  "name": "kassenspiel-vercel-supabase",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.0"
+  }
+}

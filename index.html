@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>KassenSpiel Online</title>
+<title>KassenSpiel – Vercel + Supabase</title>
 <style>
   :root{
     --bg:#f6f8fb; --panel:#ffffff; --ink:#13243a; --muted:#6f7f93; --line:#dce4ec;
@@ -156,13 +156,11 @@
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
     <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
-    <button class="btn green" onclick="login()">Anmelden</button>
+    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div>
     <div class="register-actions">
       <button class="btn" onclick="openCompanyRegistration()">＋ Firmenkonto eröffnen</button>
       <button class="btn" onclick="openEmployeeRegistration()">＋ Mitarbeiterkonto selbst erstellen</button>
     </div>
-    <button class="btn" style="width:100%;margin-top:8px" onclick="repairAdminLogin()">🔧 Admin-Login zurücksetzen</button>
-    <div class="login-note">Großer Admin: <b>admin</b> · Passwort <b>1234</b><br><span class="tiny-note">Lokaler Kassensimulator: Konten und Daten werden auf diesem Gerät gespeichert.</span></div>
   </div>
 </div>
 
@@ -1364,7 +1362,10 @@ function estimateHeight(r){return Math.min(268,62+r.items.length*14+(r.coupon?10
 function packReceipts(receipts){const pages=[];let page={cols:[[],[]],h:[0,0]};for(const r of receipts){const h=estimateHeight(r)+5;let c=page.h[0]<=page.h[1]?0:1;if(page.h[c]+h>272){const other=c===0?1:0;if(page.h[other]+h<=272)c=other;else{pages.push(page);page={cols:[[],[]],h:[0,0]};c=0}}page.cols[c].push(r);page.h[c]+=h}if(page.cols[0].length||page.cols[1].length)pages.push(page);return pages}
 function updatePrintSummary(){const ids=selectedIds();const rs=state.receipts.filter(r=>ids.includes(r.id));const pages=packReceipts(rs).length;const el=document.getElementById('printSummary');if(el)el.textContent=`${ids.length} Bon${ids.length===1?'':'s'} ausgewählt${ids.length?` · voraussichtlich ${pages} A4-Seite${pages===1?'':'n'}`:''}`}
 function printSelected(){const ids=selectedIds();if(!ids.length){toast('Bitte mindestens einen Bon auswählen','bad');return}printReceipts(ids)}
-function printReceipts(ids){const receipts=ids.map(id=>state.receipts.find(r=>r.id===id)).filter(Boolean);if(!receipts.length)return;const pages=packReceipts(receipts);const w=window.open('','_blank');const sheets=pages.map((p,pi)=>`<section class="sheet">${p.cols.map(col=>`<div class="col">${col.map(r=>receiptHtml(r,true)).join('')}</div>`).join('')}</section>`).join('');w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Bons drucken</title><style>*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff}.sheet{width:202mm;min-height:289mm;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:4mm;align-items:start;page-break-after:always}.sheet:last-child{page-break-after:auto}.col{display:flex;flex-direction:column;align-items:center;gap:2.5mm}.receipt{break-inside:avoid;page-break-inside:avoid}@page{size:A4 portrait;margin:4mm}@media print{.sheet{margin:0;min-height:0}.receipt{break-inside:avoid;page-break-inside:avoid}}</style></head><body>${sheets}<script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);w.document.close()}
+function printReceipts(ids){const receipts=ids.map(id=>state.receipts.find(r=>r.id===id)).filter(Boolean);if(!receipts.length)return;const pages=packReceipts(receipts);const w=window.open('','_blank');const sheets=pages.map((p,pi)=>`<section class="sheet">${p.cols.map(col=>`<div class="col">${col.map(r=>receiptHtml(r,true)).join('')}</div>`).join('')}</section>`).join('');w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Bons drucken</title><style>*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff}.sheet{width:202mm;min-height:289mm;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:4mm;align-items:start;page-break-after:always}.sheet:last-child{page-break-after:auto}.col{display:flex;flex-direction:column;align-items:center;gap:2.5mm}.receipt{break-inside:avoid;page-break-inside:avoid}@page{size:A4 portrait;margin:4mm}@media print{.sheet{margin:0;min-height:0}.receipt{break-inside:avoid;page-break-inside:avoid}}</style></head><body>${sheets}<script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script>
+
+
+</body></html>`);w.document.close()}
 function openCoupons(){modal('Angebote & Coupons',`<div class="helper" style="margin-bottom:12px">Zeitungscoupons werden mit Zahlencodes eingelöst, zum Beispiel wie ein Barcode-Code: 8005 2364.</div><div class="coupon-grid">${state.coupons.map(c=>`<div class="coupon-card"><div class="code">${esc(c.code)}</div><small>${esc(c.label)}${c.min?` · ab ${euro(c.min)}`:''}</small><div class="pill">${c.active?'AKTIV':'INAKTIV'}</div></div>`).join('')}</div><div class="hr"></div><h4 style="margin:0 0 10px">Neuen Zeitungscoupon anlegen</h4><div class="form-row"><div class="form-group"><label>Code</label><input id="newCouponCode" placeholder="z. B. 8005 2364" oninput="this.value=formatCouponCode(this.value)"></div><div class="form-group"><label>Rabattart</label><select id="newCouponType"><option value="fixed">Fester Betrag €</option><option value="percent">Prozent %</option></select></div></div><div class="form-row"><div class="form-group"><label>Wert</label><input id="newCouponValue" inputmode="decimal" placeholder="10"></div><div class="form-group"><label>Mindest-Einkauf €</label><input id="newCouponMin" inputmode="decimal" value="0"></div></div>`,`<button class="btn" onclick="closeModal()">Schließen</button><button class="btn green" onclick="createCoupon()">Coupon aktivieren</button>`)}
 function createCoupon(){const raw=document.getElementById('newCouponCode').value.trim();const code=formatCouponCode(raw);const type=document.getElementById('newCouponType').value;const value=parseFloat((document.getElementById('newCouponValue').value||'').replace(',','.'));const min=parseFloat((document.getElementById('newCouponMin').value||'0').replace(',','.'))||0;if(normalizeCouponCode(code).length<4||!isFinite(value)||value<=0){toast('Bitte Zahlencode und gültigen Rabatt eingeben','bad');return}if(state.coupons.some(c=>normalizeCouponCode(c.code)===normalizeCouponCode(code))){toast('Dieser Coupon-Code existiert bereits','bad');return}state.coupons.unshift({code,type,value,min,label:type==='fixed'?`${num(value)} € Zeitungscoupon`:`${num(value)} % Zeitungscoupon`,active:true});save();closeModal();openCoupons();toast('Coupon aktiviert','good')}
 let __createFromScan=false;
@@ -1875,18 +1876,247 @@ function beep(){try{primeScanAudio();const ctx=scanAudioCtx;if(!ctx)return;const
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}function escAttr(s){return esc(s)}
 setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})},1000);
 load();
-const savedUserId=localStorage.getItem('kassenspiel-online-current-user');
-if(savedUserId){
-  const u=authData.users.find(x=>x.id===savedUserId&&x.active);
-  if(u){
-    currentUser={...u};
-    document.getElementById('login').classList.add('hidden');
-    const co=activeCompany();
-    state.store=co.name;
-    if(!STORE_CATS[state.storeType])state.storeType=co.type||'Supermarkt';
-  }
-}
 attachHardwareScanner();
 renderAll();
-document.getElementById('clock').textContent=new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});</script>
+document.getElementById('clock').textContent=new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+setTimeout(()=>restoreRemoteSession(),0);</script>
+
+<script>
+/* ============================================================
+   VERCEL + SUPABASE ONLINE AUTH
+   Kein Passwort wird im Browser gespeichert.
+   ============================================================ */
+const KS_TOKEN_KEY='kassenspiel-vercel-session-v1';
+
+function ksToken(){return localStorage.getItem(KS_TOKEN_KEY)||''}
+function setKsToken(t){if(t)localStorage.setItem(KS_TOKEN_KEY,t);else localStorage.removeItem(KS_TOKEN_KEY)}
+
+async function ksApi(action,data={}){
+  const res=await fetch('/api/auth',{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      ...(ksToken()?{'Authorization':'Bearer '+ksToken()}:{})
+    },
+    body:JSON.stringify({action,...data})
+  });
+  let out={};
+  try{out=await res.json()}catch(e){}
+  if(!res.ok||out.ok===false)throw new Error(out.error||`Serverfehler ${res.status}`);
+  return out;
+}
+
+function applyRemoteSnapshot(snapshot){
+  if(!snapshot)return;
+  authData={
+    companies:Array.isArray(snapshot.companies)?snapshot.companies:[],
+    users:Array.isArray(snapshot.users)?snapshot.users:[]
+  };
+  if(snapshot.user){
+    currentUser={...snapshot.user};
+    const co=authData.companies.find(c=>c.id===currentUser.companyId)||authData.companies[0];
+    if(co){
+      state.store=co.name;
+      if(!STORE_CATS[state.storeType])state.storeType=co.type||'Supermarkt';
+    }
+  }
+}
+
+async function restoreRemoteSession(){
+  const status=document.getElementById('backendStatus');
+  if(!ksToken()){
+    if(status)status.textContent='● Bereit für Online-Anmeldung';
+    return;
+  }
+  try{
+    const out=await ksApi('snapshot');
+    applyRemoteSnapshot(out);
+    document.getElementById('login').classList.add('hidden');
+    currentUser=out.user;
+    renderAll();
+    if(status)status.textContent='● Online verbunden';
+  }catch(e){
+    setKsToken('');
+    currentUser=null;
+    document.getElementById('login').classList.remove('hidden');
+    if(status)status.textContent='● Sitzung abgelaufen – neu anmelden';
+  }
+}
+
+window.login=async function(){
+  const username=(document.getElementById('loginUser').value||'').trim();
+  const password=String(document.getElementById('loginPin').value||'');
+  const status=document.getElementById('backendStatus');
+  if(status)status.textContent='● Anmeldung läuft …';
+  try{
+    const out=await ksApi('login',{username,password});
+    setKsToken(out.token);
+    applyRemoteSnapshot(out);
+    currentUser=out.user;
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('storeChooser').classList.add('hidden');
+    state.category='Alle';
+    renderAll();
+    toast(`Willkommen ${currentUser.displayName||currentUser.username}`,'good');
+    if(status)status.textContent='● Online verbunden';
+  }catch(e){
+    if(status)status.textContent='● Anmeldung fehlgeschlagen';
+    toast(e.message||'Anmeldung fehlgeschlagen','bad');
+  }
+}
+
+window.logout=async function(){
+  setKsToken('');
+  currentUser=null;
+  authData={companies:[],users:[]};
+  document.getElementById('storeChooser').classList.add('hidden');
+  document.getElementById('login').classList.remove('hidden');
+  renderUserActions();
+  const status=document.getElementById('backendStatus');
+  if(status)status.textContent='● Bereit für Online-Anmeldung';
+}
+
+window.openEmployeeRegistration=function(){
+  modal('Mitarbeiterkonto selbst erstellen',`
+    <div class="form-group"><label>Firmen-Code</label><input id="regEmpCode" placeholder="z. B. STAR-001"></div>
+    <div class="form-row"><div class="form-group"><label>Benutzername</label><input id="regEmpUser"></div><div class="form-group"><label>Passwort</label><input id="regEmpPass" type="password"></div></div>
+    <div class="form-group"><label>Anzeigename</label><input id="regEmpName" placeholder="z. B. Kasse 2 / Mehmet"></div>
+  `,`<button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn green" onclick="selfCreateEmployee()">Konto erstellen</button>`);
+}
+
+window.selfCreateEmployee=async function(){
+  try{
+    const out=await ksApi('register_employee',{
+      companyCode:document.getElementById('regEmpCode').value.trim(),
+      username:document.getElementById('regEmpUser').value.trim(),
+      password:document.getElementById('regEmpPass').value,
+      displayName:document.getElementById('regEmpName').value.trim()
+    });
+    closeModal();toast('Mitarbeiterkonto erstellt – jetzt anmelden','good');
+  }catch(e){toast(e.message,'bad')}
+}
+
+window.openCompanyRegistration=function(){
+  modal('Firmenkonto eröffnen',`
+    <div class="helper" style="margin-bottom:12px">Erstellt eine neue Firma mit genau einem Firmen-Admin. Der große Admin kann später alle Konten aller Firmen verwalten.</div>
+    <div class="form-group"><label>Firmen-/Marktname</label><input id="regCompany" placeholder="z. B. Yildiz Markt"></div>
+    <div class="form-row"><div class="form-group"><label>Admin-Benutzername</label><input id="regOwnerUser"></div><div class="form-group"><label>Passwort</label><input id="regOwnerPass" type="password"></div></div>
+    <div class="form-group"><label>Geschäftstyp</label><select id="regCompanyType"><option>Supermarkt</option><option>Tanke</option><option>Spielzeugladen</option><option>Bank</option><option>Möbelladen</option><option>Fahrzeugladen</option></select></div>
+  `,`<button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn green" onclick="createCompanyAccount()">Firmenkonto eröffnen</button>`);
+}
+
+window.createCompanyAccount=async function(){
+  try{
+    const out=await ksApi('register_company',{
+      name:document.getElementById('regCompany').value.trim(),
+      type:document.getElementById('regCompanyType').value,
+      username:document.getElementById('regOwnerUser').value.trim(),
+      password:document.getElementById('regOwnerPass').value
+    });
+    closeModal();
+    modal('Firmenkonto erstellt',`
+      <div class="calc"><span>Firmen-Code</span><b>${esc(out.company.code)}</b></div>
+      <div class="helper" style="margin-top:12px">Mitarbeiter können sich mit diesem Code selbst registrieren.</div>
+    `,`<button class="btn green" onclick="closeModal()">Fertig</button>`);
+  }catch(e){toast(e.message,'bad')}
+}
+
+async function refreshRemoteAccounts(){
+  const out=await ksApi('snapshot');
+  applyRemoteSnapshot(out);
+  return out;
+}
+
+window.openGlobalAccounts=async function(){
+  if(!isSuperAdmin())return toast('Nur der große Admin hat Zugriff','bad');
+  try{
+    await refreshRemoteAccounts();
+    const rows=authData.users.map(u=>{
+      const co=authData.companies.find(c=>c.id===u.companyId);
+      const role=u.role==='superadmin'?'Groß-Admin':u.role==='company_admin'?'Firmen-Admin':'Mitarbeiter';
+      return `<tr>
+        <td><b>${esc(u.displayName||u.username)}</b></td>
+        <td>@${esc(u.username)}</td>
+        <td>${role}</td>
+        <td>${esc(co?.name||'System')}</td>
+        <td>${u.active?'aktiv':'gesperrt'}</td>
+        <td>${u.role==='superadmin'?'—':`<div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn" onclick="closeModal();editRemoteAccount('${u.id}')">Bearbeiten</button><button class="btn ${u.active?'danger':''}" onclick="toggleRemoteAccount('${u.id}',${!u.active})">${u.active?'Sperren':'Aktivieren'}</button><button class="btn danger" onclick="deleteRemoteAccount('${u.id}')">Löschen</button></div>`}</td>
+      </tr>`;
+    }).join('');
+
+    modal('Alle Konten verwalten',`
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="btn green" onclick="closeModal();openRemoteCreateAccount()">＋ Konto erstellen</button></div>
+      <table class="dash-table"><thead><tr><th>Name</th><th>Benutzer</th><th>Rolle</th><th>Firma</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    `,`<button class="btn" onclick="closeModal()">Schließen</button>`,true);
+  }catch(e){toast(e.message,'bad')}
+}
+
+window.openRemoteCreateAccount=function(){
+  modal('Konto erstellen',`
+    <div class="form-row">
+      <div class="form-group"><label>Firma</label><select id="rcCompany">${authData.companies.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Rolle</label><select id="rcRole"><option value="employee">Mitarbeiter</option><option value="company_admin">Firmen-Admin</option></select></div>
+    </div>
+    <div class="form-row"><div class="form-group"><label>Benutzername</label><input id="rcUser"></div><div class="form-group"><label>Passwort</label><input id="rcPass" type="password"></div></div>
+    <div class="form-group"><label>Anzeigename</label><input id="rcName"></div>
+  `,`<button class="btn" onclick="closeModal();openGlobalAccounts()">Abbrechen</button><button class="btn green" onclick="createRemoteAccount()">Erstellen</button>`);
+}
+
+window.createRemoteAccount=async function(){
+  try{
+    await ksApi('create_user',{
+      companyId:document.getElementById('rcCompany').value,
+      role:document.getElementById('rcRole').value,
+      username:document.getElementById('rcUser').value.trim(),
+      password:document.getElementById('rcPass').value,
+      displayName:document.getElementById('rcName').value.trim()
+    });
+    closeModal();await openGlobalAccounts();toast('Konto erstellt','good');
+  }catch(e){toast(e.message,'bad')}
+}
+
+window.editRemoteAccount=async function(id){
+  try{
+    await refreshRemoteAccounts();
+    const u=authData.users.find(x=>x.id===id);if(!u)return;
+    modal('Konto bearbeiten',`
+      <div class="form-row"><div class="form-group"><label>Anzeigename</label><input id="ruName" value="${escAttr(u.displayName||'')}"></div><div class="form-group"><label>Benutzername</label><input id="ruUser" value="${escAttr(u.username)}"></div></div>
+      <div class="form-row"><div class="form-group"><label>Neues Passwort</label><input id="ruPass" type="password" placeholder="leer = unverändert"></div><div class="form-group"><label>Status</label><select id="ruActive"><option value="1" ${u.active?'selected':''}>Aktiv</option><option value="0" ${!u.active?'selected':''}>Gesperrt</option></select></div></div>
+      <div class="form-row"><div class="form-group"><label>Firma</label><select id="ruCompany">${authData.companies.map(c=>`<option value="${c.id}" ${c.id===u.companyId?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div><div class="form-group"><label>Rolle</label><select id="ruRole"><option value="employee" ${u.role==='employee'?'selected':''}>Mitarbeiter</option><option value="company_admin" ${u.role==='company_admin'?'selected':''}>Firmen-Admin</option></select></div></div>
+    `,`<button class="btn" onclick="closeModal();openGlobalAccounts()">Abbrechen</button><button class="btn green" onclick="saveRemoteAccount('${id}')">Speichern</button>`);
+  }catch(e){toast(e.message,'bad')}
+}
+
+window.saveRemoteAccount=async function(id){
+  try{
+    await ksApi('update_user',{
+      id,
+      username:document.getElementById('ruUser').value.trim(),
+      password:document.getElementById('ruPass').value,
+      displayName:document.getElementById('ruName').value.trim(),
+      companyId:document.getElementById('ruCompany').value,
+      role:document.getElementById('ruRole').value,
+      active:document.getElementById('ruActive').value==='1'
+    });
+    closeModal();await openGlobalAccounts();toast('Konto gespeichert','good');
+  }catch(e){toast(e.message,'bad')}
+}
+
+window.toggleRemoteAccount=async function(id,active){
+  try{await ksApi('update_user',{id,active});closeModal();await openGlobalAccounts()}catch(e){toast(e.message,'bad')}
+}
+
+window.deleteRemoteAccount=async function(id){
+  if(!confirm('Konto wirklich löschen?'))return;
+  try{await ksApi('delete_user',{id});closeModal();await openGlobalAccounts();toast('Konto gelöscht','good')}catch(e){toast(e.message,'bad')}
+}
+
+/* Der vorhandene Header-Button "Konten" soll beim Groß-Admin die Online-Liste öffnen. */
+window.openAccountsEntry=function(){
+  if(isSuperAdmin())openGlobalAccounts();
+  else if(isCompanyAdmin())openAccountManager();
+  else toast('Keine Berechtigung','bad');
+}
+</script>
+
 </body></html>
