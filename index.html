@@ -295,6 +295,32 @@
 .auto-image-pending{transition:opacity .18s ease,filter .18s ease}
 .pic img{background:#edf3f6}
 
+
+.barcode-article-card{
+  border:1px solid var(--line);border-radius:16px;padding:16px;background:#fff
+}
+.barcode-article-top{display:flex;gap:12px;align-items:center}
+.barcode-article-top img{width:68px;height:54px;object-fit:cover;border-radius:10px;background:#eef3f6}
+.barcode-article-top b{display:block;font-size:16px;color:#10253c}
+.barcode-article-top small{display:block;margin-top:4px;color:#7d8da0}
+.barcode-article-big{
+  margin-top:16px;padding:14px;background:#fff;border:1px solid #dce4ea;border-radius:12px
+}
+.barcode-article-big svg{display:block;width:100%;height:120px}
+.barcode-article-big .barcode-num{text-align:center;font-family:monospace;font-size:17px;letter-spacing:3px;margin-top:6px}
+.barcode-article-code{text-align:center;font-family:monospace;font-size:16px;letter-spacing:3px;margin-top:6px}
+@media(max-width:720px){
+  .barcode-article-big svg{height:92px}
+}
+
+
+.scan-torch-btn{
+  position:absolute;right:12px;top:12px;z-index:7;border:1px solid rgba(255,255,255,.35);
+  background:rgba(3,24,42,.70);color:#fff;border-radius:10px;padding:9px 12px;font-weight:800;
+  backdrop-filter:blur(5px)
+}
+.scan-torch-btn.on{background:#ffc93d;color:#1d2b38;border-color:#ffc93d}
+
 </style>
 </head>
 <body>
@@ -305,7 +331,7 @@
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
     <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
-    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: ALLE-PRODUKTBILDER-21-32</div>
+    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: TURBO-SCAN-BARCODE-ARTIKEL-21-40</div>
     <div class="register-actions">
       <button class="btn" onclick="openCompanyRegistration()">＋ Firmenkonto eröffnen</button>
       <button class="btn" onclick="openEmployeeRegistration()">＋ Mitarbeiterkonto selbst erstellen</button>
@@ -361,7 +387,7 @@
       <button class="btn" onclick="openMusic()">♫ Musik</button>
       <button class="btn" onclick="openReceipts()">▤ Käufe & Bons</button>
       <button class="btn warn" onclick="openCoupons()">🎟 Angebote & Coupons</button>
-      <button class="btn soft" onclick="focusBarcode()">▥ Barcode für Artikel</button>
+      <button class="btn soft" onclick="openBarcodeForArticle()">▥ Barcode für Artikel</button>
       <button class="btn primary" onclick="openCreateProduct()">＋ Neuer Artikel</button>
       <button class="btn" onclick="newDay()">↻ Neuer Kassentag</button>
     </div>
@@ -623,7 +649,7 @@ const ACCOUNT_KEY='kassenspiel-online-accounts-v1';
 let authData={companies:[],users:[]};
 let currentUser=null;
 let musicAudio=null,musicFiles=[],musicIndex=-1;
-let hardwareBuffer='',hardwareLastKey=0;
+let hardwareBuffer='',hardwareLastKey=0,hardwareFlushTimer=null;
 
 function randomCompanyCode(name){
   const base=(name||'MARKT').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,5)||'MARKT';
@@ -760,6 +786,27 @@ function todayReceipts(){
 function receiptCosts(r){return (r.items||[]).reduce((s,x)=>s+(Number(x.costTotal)||0),0)}
 function receiptLoss(r){return (r.items||[]).reduce((s,x)=>s+Math.max(0,(Number(x.costTotal)||0)-(Number(x.linePrice)||0)),0)}
 
+function flushHardwareScannerBuffer(){
+  if(hardwareBuffer.length<4)return;
+  const code=hardwareBuffer;
+  hardwareBuffer='';
+  if(hardwareFlushTimer)clearTimeout(hardwareFlushTimer);
+  hardwareFlushTimer=null;
+
+  const inp=document.getElementById('barcodeInput');
+  if(inp){
+    inp.value=code;
+    processCode();
+    scanBeep('ok');
+  }
+
+  const st=document.getElementById('hardwareScannerStatus');
+  if(st){
+    st.textContent=`✓ Scanner: ${code}`;
+    setTimeout(()=>st.textContent='● USB/Bluetooth-Scanner bereit',900);
+  }
+}
+
 function attachHardwareScanner(){
   document.addEventListener('keydown',e=>{
     if(e.ctrlKey||e.metaKey||e.altKey)return;
@@ -769,23 +816,26 @@ function attachHardwareScanner(){
     if(typing)return;
 
     const now=performance.now();
-    if(now-hardwareLastKey>120)hardwareBuffer='';
+    if(now-hardwareLastKey>100)hardwareBuffer='';
     hardwareLastKey=now;
 
     if(e.key==='Enter'){
       if(hardwareBuffer.length>=4){
-        const code=hardwareBuffer;hardwareBuffer='';
         e.preventDefault();
-        const inp=document.getElementById('barcodeInput');
-        if(inp){inp.value=code;processCode();scanBeep('ok')}
-        const st=document.getElementById('hardwareScannerStatus');
-        if(st){st.textContent=`✓ Scanner: ${code}`;setTimeout(()=>st.textContent='● USB/Bluetooth-Scanner bereit',1600)}
+        flushHardwareScannerBuffer();
       }
       return;
     }
+
     if(e.key.length===1 && /[0-9A-Za-z]/.test(e.key)){
       hardwareBuffer+=e.key;
       if(hardwareBuffer.length>32)hardwareBuffer=hardwareBuffer.slice(-32);
+
+      // Viele Scanner senden Enter. Falls nicht: nach sehr kurzer Eingabepause automatisch übernehmen.
+      if(hardwareFlushTimer)clearTimeout(hardwareFlushTimer);
+      hardwareFlushTimer=setTimeout(()=>{
+        if(hardwareBuffer.length>=4)flushHardwareScannerBuffer();
+      },48);
     }
   },true);
 }
@@ -1767,6 +1817,119 @@ function applyInlineWeight(id){
   x.weight=m.base;x.linePrice=+(m.base*x.unitPrice).toFixed(2);x.manualPrice=false;save();renderCart();toast(`Preis automatisch: ${euro(x.linePrice)}`,'good')
 }
 function focusBarcode(){document.getElementById('barcodeInput').focus()}
+
+function openBarcodeForArticle(prefill=''){
+  const options=(state.products||[]).map(p=>`<option value="${escAttr(p.name)} · ${escAttr(p.barcode)}"></option>`).join('');
+  modal('Barcode für Artikel',`
+    <div class="helper" style="margin-bottom:12px">
+      Artikel suchen und seinen Barcode groß anzeigen oder als Etikett drucken.
+    </div>
+
+    <div class="form-group">
+      <label>Artikelname oder Barcode</label>
+      <input id="barcodeArticleSearch" list="barcodeArticleList" value="${escAttr(prefill)}"
+        placeholder="z. B. Vollmilch oder 400001"
+        oninput="updateBarcodeArticlePreview()" autocomplete="off">
+      <datalist id="barcodeArticleList">${options}</datalist>
+    </div>
+
+    <div id="barcodeArticlePreview" style="margin-top:12px"></div>
+  `,`
+    <button class="btn" onclick="closeModal()">Schließen</button>
+    <button class="btn primary" onclick="printSelectedArticleBarcode()">🖨 Barcode drucken</button>
+  `,true);
+
+  setTimeout(()=>{
+    const inp=document.getElementById('barcodeArticleSearch');
+    if(inp){inp.focus();updateBarcodeArticlePreview()}
+  },50);
+}
+
+function selectedBarcodeArticle(){
+  const inp=document.getElementById('barcodeArticleSearch');
+  const raw=(inp?.value||'').trim();
+  if(!raw)return null;
+  const barcodePart=raw.includes('·')?raw.split('·').pop().trim():raw;
+  return state.products.find(p =>
+    String(p.barcode)===barcodePart ||
+    String(p.barcode)===raw ||
+    p.name.toLowerCase()===raw.toLowerCase() ||
+    raw.toLowerCase().startsWith(p.name.toLowerCase()+' ·')
+  ) || state.products.find(p=>p.name.toLowerCase().includes(raw.toLowerCase()));
+}
+
+function updateBarcodeArticlePreview(){
+  const root=document.getElementById('barcodeArticlePreview');
+  if(!root)return;
+  const p=selectedBarcodeArticle();
+  if(!p){
+    root.innerHTML=`
+      <div class="helper" style="text-align:center;padding:22px">
+        Artikel auswählen. Danach erscheint hier der Barcode.
+      </div>`;
+    return;
+  }
+  root.innerHTML=`
+    <div class="barcode-article-card">
+      <div class="barcode-article-top">
+        <img src="${escAttr(realPhotoUrl(p))}" alt="${escAttr(p.name)}"
+          onerror="this.style.display='none'">
+        <div>
+          <b>${esc(p.name)}</b>
+          <small>${esc(p.cat)} · ${euro(p.price)}</small>
+        </div>
+      </div>
+      <div class="barcode-article-big">${barcodeSvg(p.barcode)}</div>
+      <div class="barcode-article-code">${esc(p.barcode)}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        <button class="btn" onclick="copySelectedArticleBarcode()">Code kopieren</button>
+        <button class="btn green" onclick="printSelectedArticleBarcode()">🖨 Etikett drucken</button>
+      </div>
+    </div>`;
+}
+
+async function copySelectedArticleBarcode(){
+  const p=selectedBarcodeArticle();
+  if(!p)return toast('Bitte zuerst einen Artikel auswählen','bad');
+  try{
+    await navigator.clipboard.writeText(String(p.barcode));
+    toast('Barcode kopiert','good');
+  }catch(e){
+    toast(`Barcode: ${p.barcode}`,'good');
+  }
+}
+
+function printSelectedArticleBarcode(){
+  const p=selectedBarcodeArticle();
+  if(!p)return toast('Bitte zuerst einen Artikel auswählen','bad');
+
+  const w=window.open('','_blank','width=520,height=650');
+  if(!w)return toast('Popup wurde blockiert','bad');
+
+  w.document.write(`<!doctype html>
+  <html><head><meta charset="utf-8"><title>Barcode ${esc(p.name)}</title>
+  <style>
+    @page{size:80mm 50mm;margin:3mm}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Arial,sans-serif;color:#111}
+    .label{width:74mm;height:44mm;border:1px solid #ddd;border-radius:3mm;padding:3mm;display:flex;flex-direction:column;justify-content:center}
+    .name{font-weight:800;font-size:12pt;margin-bottom:2mm;text-align:center}
+    .price{text-align:center;font-size:10pt;margin-bottom:2mm}
+    svg{display:block;width:68mm;height:22mm;margin:0 auto}
+    .barcode-num,.code{text-align:center;font-family:monospace;letter-spacing:2px;font-size:9pt}
+    @media print{.label{border:0}}
+  </style></head>
+  <body>
+    <div class="label">
+      <div class="name">${esc(p.name)}</div>
+      <div class="price">${euro(p.price)}</div>
+      ${barcodeSvg(p.barcode)}
+    </div>
+    <script>window.onload=()=>{window.print()}<\/script>
+  </body></html>`);
+  w.document.close();
+}
+
 function processCode(){
   const el=document.getElementById('barcodeInput'),code=el.value.trim();
   if(!code)return;
@@ -1968,7 +2131,7 @@ function saveStore(){state.store=document.getElementById('storeName').value.trim
 function switchStore(){showStoreChooser()}
 function newDay(){if(!confirm('Neuen Kassentag starten? Tagesumsatz und Vorgänge werden auf 0 gesetzt. Bons bleiben gespeichert.'))return;state.sales=0;state.tx=0;state.cart=[];state.activeCoupon=null;save();renderAll();toast('Neuer Kassentag gestartet','good')}
 let scanMode='checkout',scanCreateDraft=null;
-let scanStream=null,scanTimer=null,scanDetector=null,scanBusy=false,scanTick=0;
+let scanStream=null,scanTimer=null,scanDetector=null,scanBusy=false,scanTick=0,scanLoopActive=false,scanTrack=null,scanTorchOn=false;
 let scanLastValue='',scanLastAt=0,scanAudioCtx=null;
 
 function openScanner(mode='checkout',draft=null){
@@ -1985,7 +2148,7 @@ function openScanner(mode='checkout',draft=null){
       <div id="scanFlash" class="scan-flash"></div>
       <div class="scan-frame"><span class="scan-corner"></span></div>
       <div class="scan-line"></div>
-      <button class="scan-center-btn" onclick="manualDetectFrame()">◎ Jetzt erkennen</button>
+      <button class="scan-center-btn" onclick="manualDetectFrame()">◎ Jetzt erkennen</button><button id="scanTorchBtn" class="scan-torch-btn" onclick="toggleScannerTorch()">🔦 Licht</button>
       <div class="scan-hint">Barcode vollständig in den Rahmen · Kamera ruhig halten</div>
     </div>
     <div id="scanStatus" class="scan-status">Schnellscan startet …</div>
@@ -2137,7 +2300,7 @@ function acceptScannedCode(val){
   if(!val)return false;
 
   const now=Date.now();
-  if(val===scanLastValue && now-scanLastAt<850)return true;
+  if(val===scanLastValue && now-scanLastAt<380)return true;
   scanLastValue=val;scanLastAt=now;
 
   const p=state.products.find(x=>x.barcode===val);
@@ -2202,20 +2365,79 @@ async function startScanner(){
         frameRate:{ideal:60,min:24}
       }
     });
+
     const v=document.getElementById('scanVideo');
     if(!v)return;
     v.srcObject=scanStream;
     await v.play().catch(()=>{});
+
+    scanTrack=scanStream.getVideoTracks()[0]||null;
+    if(scanTrack){
+      try{
+        const caps=scanTrack.getCapabilities?.()||{};
+        const advanced=[];
+        if(Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')){
+          advanced.push({focusMode:'continuous'});
+        }
+        if(advanced.length) await scanTrack.applyConstraints({advanced});
+      }catch(e){}
+      updateTorchButton();
+    }
+
     if('BarcodeDetector' in window){
-      scanDetector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','itf','upc_a','upc_e','qr_code']});
-      scannerStatus('⚡ Schnellscan aktiv – Barcode wird laufend gesucht …');
-      scanTimer=setInterval(()=>detectFastFrame(),70);
+      let formats=['ean_13','ean_8','code_128','code_39','itf','upc_a','upc_e','qr_code'];
+      try{
+        if(BarcodeDetector.getSupportedFormats){
+          const supported=await BarcodeDetector.getSupportedFormats();
+          formats=formats.filter(f=>supported.includes(f));
+          if(!formats.length)formats=supported;
+        }
+      }catch(e){}
+      scanDetector=new BarcodeDetector({formats});
+      scannerStatus('⚡ Turbo-Scan aktiv – Barcode wird permanent gelesen …');
+      scanLoopActive=true;
+      runTurboScanLoop();
     }else{
-      scannerStatus('Dieser Browser unterstützt BarcodeDetector nicht. Nutze die manuelle Eingabe.');
+      scannerStatus('Dieser Browser unterstützt BarcodeDetector nicht. Nutze die manuelle Eingabe oder einen USB/Bluetooth-Scanner.');
     }
   }catch(e){
     scannerStatus('Kamera konnte nicht geöffnet werden. Prüfe die Kameraberechtigung.');
     toast('Kamera konnte nicht geöffnet werden','bad');
+  }
+}
+
+async function runTurboScanLoop(){
+  if(!scanLoopActive||!scanDetector)return;
+  const started=performance.now();
+  try{await detectFastFrame()}catch(e){}
+  if(!scanLoopActive||!scanDetector)return;
+  const elapsed=performance.now()-started;
+  // praktisch direkt den nächsten Frame prüfen; auf langsamen Geräten automatisch etwas Luft lassen
+  const wait=elapsed>90?8:18;
+  scanTimer=setTimeout(runTurboScanLoop,wait);
+}
+
+function updateTorchButton(){
+  const btn=document.getElementById('scanTorchBtn');
+  if(!btn)return;
+  let hasTorch=false;
+  try{hasTorch=!!scanTrack?.getCapabilities?.().torch}catch(e){}
+  btn.style.display=hasTorch?'block':'none';
+  btn.classList.toggle('on',scanTorchOn);
+  btn.textContent=scanTorchOn?'🔦 Licht an':'🔦 Licht';
+}
+
+async function toggleScannerTorch(){
+  if(!scanTrack)return;
+  try{
+    const caps=scanTrack.getCapabilities?.()||{};
+    if(!caps.torch)return toast('Kameralicht wird auf diesem Gerät nicht unterstützt','bad');
+    scanTorchOn=!scanTorchOn;
+    await scanTrack.applyConstraints({advanced:[{torch:scanTorchOn}]});
+    updateTorchButton();
+  }catch(e){
+    scanTorchOn=false;updateTorchButton();
+    toast('Kameralicht konnte nicht eingeschaltet werden','bad');
   }
 }
 
@@ -2236,13 +2458,13 @@ async function detectFastFrame(){
     }catch(e){}
 
     // Mittlerer Ausschnitt nur jede 3. Runde -> schneller als jedes Mal alle Varianten
-    if(scanTick%3!==0)return false;
+    if(scanTick%2!==0)return false;
 
     const vw=v.videoWidth||1280,vh=v.videoHeight||720;
     if(!vw||!vh)return false;
     const sx=Math.floor(vw*.06), sy=Math.floor(vh*.22), sw=Math.floor(vw*.88), sh=Math.floor(vh*.56);
     const base=document.createElement('canvas');
-    base.width=Math.min(sw,1100);base.height=Math.round(base.width*(sh/sw));
+    base.width=Math.min(sw,900);base.height=Math.round(base.width*(sh/sw));
     const bctx=base.getContext('2d',{willReadFrequently:true});
     bctx.drawImage(v,sx,sy,sw,sh,0,0,base.width,base.height);
     try{
@@ -2255,11 +2477,11 @@ async function detectFastFrame(){
     }catch(e){}
 
     // Kontrast nur jede 6. Runde
-    if(scanTick%6!==0)return false;
+    if(scanTick%4!==0)return false;
     const contrast=document.createElement('canvas');
     contrast.width=base.width;contrast.height=base.height;
     const cctx=contrast.getContext('2d',{willReadFrequently:true});
-    cctx.filter='grayscale(1) contrast(2.4)';
+    cctx.filter='grayscale(1) contrast(2.15)';
     cctx.drawImage(base,0,0);
     try{
       const found=await scanDetector.detect(contrast);
@@ -2336,10 +2558,11 @@ async function detectMultipleVariants(force=true){
 }
 
 function stopScanner(){
-  if(scanTimer)clearInterval(scanTimer);
+  scanLoopActive=false;
+  if(scanTimer){clearTimeout(scanTimer);clearInterval(scanTimer)}
   scanTimer=null;scanDetector=null;scanBusy=false;scanTick=0;
   if(scanStream)scanStream.getTracks().forEach(t=>t.stop());
-  scanStream=null;
+  scanStream=null;scanTrack=null;scanTorchOn=false;
 }
 function renderUserActions(){
   const badge=document.getElementById('currentUserBadge'),
