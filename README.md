@@ -1,46 +1,60 @@
-# KassenSpiel – Vercel + Supabase
+# KassenSpiel ONLINE SYNC V3
 
-Diese Version löst den Login NICHT mehr über localStorage.
-Benutzer/Firmen liegen zentral in Supabase und Login/API laufen über Vercel.
+Diese Version speichert jetzt zentral in Supabase:
 
-## 1. Supabase
-1. Neues oder vorhandenes Supabase-Projekt öffnen.
-2. SQL Editor öffnen.
-3. `supabase_setup.sql` komplett ausführen.
-4. Unter Project Settings > API notieren:
-   - Project URL
-   - service_role Key (NICHT öffentlich teilen)
+- Firmen und Benutzer
+- Produkte
+- Produktbilder / Bild-URLs
+- Coupons
+- Bons / Verkäufe
+- Tagesumsatz und Vorgänge
+- Aktivitäten
 
-## 2. GitHub
-Den INHALT dieses Ordners/ZIP in dein Repository hochladen:
+Der Warenkorb bleibt absichtlich lokal pro Kasse. Dadurch können PC, Handy und iPad gleichzeitig als getrennte Kassen arbeiten.
+
+## UPDATE VON DEINER JETZIGEN VERSION
+
+### 1. Supabase
+Öffne:
+Supabase -> dein Projekt -> SQL Editor -> New query
+
+Kopiere den kompletten Inhalt von:
+`supabase_upgrade_online_sync.sql`
+
+Drücke `Run`.
+
+Wenn `Success` erscheint, ist die Datenbank fertig.
+
+### 2. GitHub
+Lade den kompletten Inhalt dieses Ordners in dein bestehendes GitHub-Repository hoch und überschreibe gleichnamige Dateien.
+
+Wichtig:
 - index.html
+- api/auth.js
 - package.json
 - vercel.json
-- supabase_setup.sql
-- api/auth.js
 
-## 3. Vercel
-Repository in Vercel importieren.
+### 3. Vercel
+Deine bestehenden Environment Variables bleiben gleich:
+- SUPABASE_URL
+- SUPABASE_SERVICE_ROLE_KEY
+- APP_SECRET
 
-In Vercel > Project > Settings > Environment Variables anlegen:
-- SUPABASE_URL = deine Supabase Project URL
-- SUPABASE_SERVICE_ROLE_KEY = dein service_role Key
-- APP_SECRET = ein langes zufälliges Geheimnis, z. B. mindestens 32 Zeichen
+Nach dem GitHub-Commit sollte Vercel automatisch neu deployen.
+Warte auf `Ready`.
 
-Danach Redeploy.
+## Erster Start
+Login:
+- admin
+- 1234
 
-## 4. Erster Login
-Benutzername: admin
-Passwort: 1234
+Beim ersten Start nach dem Update werden die vorhandenen Beispielprodukte und Coupons automatisch in Supabase übernommen.
 
-Beim ersten erfolgreichen `admin / 1234` Login wird das zentrale Groß-Admin-Konto automatisch in Supabase angelegt/repariert.
+Danach gilt:
+- Artikel auf einem Gerät ändern -> kurze Zeit später auf allen anderen Geräten sichtbar.
+- Bon auf Kasse 1 erstellen -> erscheint auch auf Kasse 2 / iPad / Handy.
+- Umsatz und Vorgänge werden serverseitig gezählt.
+- Wenn kurz kein Internet da ist, kassiert die lokale Kasse weiter; Bons werden später nachgesendet.
 
-## Wichtig
-GitHub Pages allein kann `/api/auth` nicht ausführen. Diese Version muss über Vercel geöffnet werden.
-Du kannst den Code weiterhin in GitHub speichern, aber die öffentliche URL muss die Vercel-URL sein.
-
-## Konten
-- Groß-Admin: sieht/verwaltert alle Konten aller Firmen.
-- Firmen-Admin: verwaltet seine Firma.
-- Mitarbeiter: normales Kassenkonto.
-- Firmen- und Mitarbeiterregistrierung werden ebenfalls zentral in Supabase gespeichert.
+Build:
+ONLINE-SYNC-V3-13-50

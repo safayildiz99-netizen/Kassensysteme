@@ -321,6 +321,11 @@
 }
 .scan-torch-btn.on{background:#ffc93d;color:#1d2b38;border-color:#ffc93d}
 
+
+#cloudSyncStatus.syncing{background:#fff4d7;color:#8c6400;border-color:#f1d486}
+#cloudSyncStatus.error{background:#ffe8e8;color:#b33030;border-color:#efb7b7}
+#cloudSyncStatus.ready{background:#e7f7ef;color:#087d58;border-color:#b9e8d3}
+
 </style>
 </head>
 <body>
@@ -331,7 +336,7 @@
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
     <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
-    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: SUPER-BLITZSCAN-21-48</div>
+    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: ONLINE-SYNC-V3-13-50</div>
     <div class="register-actions">
       <button class="btn" onclick="openCompanyRegistration()">＋ Firmenkonto eröffnen</button>
       <button class="btn" onclick="openEmployeeRegistration()">＋ Mitarbeiterkonto selbst erstellen</button>
@@ -383,7 +388,7 @@
     <div class="stat"><div class="ico">◷</div><div><small>Aktuelle Uhrzeit</small><strong id="clock">--:--</strong></div></div>
     <div class="stats-spacer"></div>
     <div class="mini-actions">
-      <span id="hardwareScannerStatus" class="hardware-status ready">● USB/Bluetooth-Scanner bereit</span>
+      <span id="hardwareScannerStatus" class="hardware-status ready">● USB/Bluetooth-Scanner bereit</span><span id="cloudSyncStatus" class="hardware-status ready">☁ Online-Sync bereit</span>
       <button class="btn" onclick="openMusic()">♫ Musik</button>
       <button class="btn" onclick="openReceipts()">▤ Käufe & Bons</button>
       <button class="btn warn" onclick="openCoupons()">🎟 Angebote & Coupons</button>
@@ -772,8 +777,10 @@ function isCompanyAdmin(){return currentUser?.role==='company_admin'}
 function isOwner(){return isSuperAdmin()||isCompanyAdmin()}
 function logActivity(action,details=''){
   state.activityLog=state.activityLog||[];
-  state.activityLog.unshift({id:uid(),time:new Date().toISOString(),companyId:currentUser?.companyId||'',username:currentUser?.username||'system',action,details});
+  const entry={id:uid(),time:new Date().toISOString(),companyId:currentUser?.companyId||'',username:currentUser?.username||'system',action,details};
+  state.activityLog.unshift(entry);
   state.activityLog=state.activityLog.slice(0,500);
+  if(typeof remoteAddActivity==='function')remoteAddActivity(entry);
 }
 function uniqueUsername(name,exceptId=''){return !authData.users.some(u=>u.id!==exceptId&&u.username.toLowerCase()===String(name).toLowerCase())}
 
@@ -1599,7 +1606,9 @@ async function findCommonsProductImage(p){
     const found=candidates[0]?.url||'';
     if(found){
       ksImageCache[key]=found;
+      p.image=found;
       try{localStorage.setItem(KS_IMG_CACHE_KEY,JSON.stringify(ksImageCache))}catch(e){}
+      if(typeof remoteUpsertProduct==='function')remoteUpsertProduct(p,{silent:true});
       return found;
     }
   }catch(e){}
@@ -2126,6 +2135,7 @@ function finishPayment(type){
   state.receipts.unshift(r);logActivity('Verkauf',`${euro(ch)} · ${payMethod} · Bon ${r.id}`);
   state.sales=+(state.sales+ch).toFixed(2);
   state.tx+=1;
+  remoteRecordReceipt(r);
   state.cart=[];
   state.activeCoupon=null;
   save();
@@ -2148,7 +2158,22 @@ function printReceipts(ids){const receipts=ids.map(id=>state.receipts.find(r=>r.
 
 </body></html>`);w.document.close()}
 function openCoupons(){modal('Angebote & Coupons',`<div class="helper" style="margin-bottom:12px">Zeitungscoupons werden mit Zahlencodes eingelöst, zum Beispiel wie ein Barcode-Code: 8005 2364.</div><div class="coupon-grid">${state.coupons.map(c=>`<div class="coupon-card"><div class="code">${esc(c.code)}</div><small>${esc(c.label)}${c.min?` · ab ${euro(c.min)}`:''}</small><div class="pill">${c.active?'AKTIV':'INAKTIV'}</div></div>`).join('')}</div><div class="hr"></div><h4 style="margin:0 0 10px">Neuen Zeitungscoupon anlegen</h4><div class="form-row"><div class="form-group"><label>Code</label><input id="newCouponCode" placeholder="z. B. 8005 2364" oninput="this.value=formatCouponCode(this.value)"></div><div class="form-group"><label>Rabattart</label><select id="newCouponType"><option value="fixed">Fester Betrag €</option><option value="percent">Prozent %</option></select></div></div><div class="form-row"><div class="form-group"><label>Wert</label><input id="newCouponValue" inputmode="decimal" placeholder="10"></div><div class="form-group"><label>Mindest-Einkauf €</label><input id="newCouponMin" inputmode="decimal" value="0"></div></div>`,`<button class="btn" onclick="closeModal()">Schließen</button><button class="btn green" onclick="createCoupon()">Coupon aktivieren</button>`)}
-function createCoupon(){const raw=document.getElementById('newCouponCode').value.trim();const code=formatCouponCode(raw);const type=document.getElementById('newCouponType').value;const value=parseFloat((document.getElementById('newCouponValue').value||'').replace(',','.'));const min=parseFloat((document.getElementById('newCouponMin').value||'0').replace(',','.'))||0;if(normalizeCouponCode(code).length<4||!isFinite(value)||value<=0){toast('Bitte Zahlencode und gültigen Rabatt eingeben','bad');return}if(state.coupons.some(c=>normalizeCouponCode(c.code)===normalizeCouponCode(code))){toast('Dieser Coupon-Code existiert bereits','bad');return}state.coupons.unshift({code,type,value,min,label:type==='fixed'?`${num(value)} € Zeitungscoupon`:`${num(value)} % Zeitungscoupon`,active:true});save();closeModal();openCoupons();toast('Coupon aktiviert','good')}
+function createCoupon(){
+  const raw=document.getElementById('newCouponCode').value.trim();
+  const code=formatCouponCode(raw);
+  const type=document.getElementById('newCouponType').value;
+  const value=parseFloat((document.getElementById('newCouponValue').value||'').replace(',','.'));
+  const min=parseFloat((document.getElementById('newCouponMin').value||'0').replace(',','.'))||0;
+  if(normalizeCouponCode(code).length<4||!isFinite(value)||value<=0){toast('Bitte Zahlencode und gültigen Rabatt eingeben','bad');return}
+  if(state.coupons.some(c=>normalizeCouponCode(c.code)===normalizeCouponCode(code))){toast('Dieser Coupon-Code existiert bereits','bad');return}
+  const c={code,type,value,min,label:type==='fixed'?`${num(value)} € Zeitungscoupon`:`${num(value)} % Zeitungscoupon`,active:true};
+  state.coupons.unshift(c);
+  save();
+  remoteUpsertCoupon(c);
+  closeModal();
+  openCoupons();
+  toast('Coupon aktiviert','good');
+}
 let __createFromScan=false;
 let __productDraft=null;
 
@@ -2254,7 +2279,7 @@ function createProduct(){
   if(p.measureMode==='mass'){p.unit='kg';p.measurePricingVersion=2}
   if(p.measureMode==='volume'){p.unit='L';p.measurePricingVersion=2}
   normalizeWeightedProduct(p);ensureProductBarcode(p);
-  state.products.push(p);logActivity('Artikel erstellt',`${p.name} · ${p.barcode}`);save();closeModal();renderProducts();scanBeep('ok');
+  state.products.push(p);logActivity('Artikel erstellt',`${p.name} · ${p.barcode}`);save();remoteUpsertProduct(p);closeModal();renderProducts();scanBeep('ok');
   toast(p.weighted?(p.weightUnit==='L'?'Flüssigkeitsartikel erstellt – Menge wird beim Kassieren eingegeben':'Wiegeartikel erstellt – Gewicht wird beim Kassieren eingegeben'):'Artikel erstellt','good');
   if(__createFromScan){__createFromScan=false;setTimeout(()=>addProduct(p.id),70)}
 }
@@ -2294,13 +2319,13 @@ function saveProduct(id){
   p.measurePricingVersion=(p.measureMode==='mass'||p.measureMode==='volume')?2:undefined;
   if(p.measureMode==='mass')p.unit='kg';
   if(p.measureMode==='volume')p.unit='L';
-  normalizeWeightedProduct(p);ensureProductBarcode(p);logActivity('Artikel geändert',p.name);save();closeModal();renderProducts();
+  normalizeWeightedProduct(p);ensureProductBarcode(p);logActivity('Artikel geändert',p.name);save();remoteUpsertProduct(p);closeModal();renderProducts();
 }
-function deleteProduct(id){state.products=state.products.filter(p=>p.id!==id);save();closeModal();renderProducts();toast('Artikel gelöscht')}
+function deleteProduct(id){state.products=state.products.filter(p=>p.id!==id);save();remoteDeleteProduct(id);closeModal();renderProducts();toast('Artikel gelöscht')}
 function openStore(){modal('Bon & Laden',`<div class="form-group"><label>Ladenname</label><input id="storeName" value="${escAttr(state.store)}"></div><div class="helper">Der Ladenname erscheint oben in der Kasse und auf allen neu erstellten Bons.</div>`,`<button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn green" onclick="saveStore()">Speichern</button>`)}
-function saveStore(){state.store=document.getElementById('storeName').value.trim()||'Star Markt';save();closeModal();renderHeader();toast('Laden gespeichert','good')}
+function saveStore(){state.store=document.getElementById('storeName').value.trim()||'Star Markt';save();scheduleRemoteCompanyStatePush();closeModal();renderHeader();toast('Laden gespeichert','good')}
 function switchStore(){showStoreChooser()}
-function newDay(){if(!confirm('Neuen Kassentag starten? Tagesumsatz und Vorgänge werden auf 0 gesetzt. Bons bleiben gespeichert.'))return;state.sales=0;state.tx=0;state.cart=[];state.activeCoupon=null;save();renderAll();toast('Neuer Kassentag gestartet','good')}
+function newDay(){if(!confirm('Neuen Kassentag starten? Tagesumsatz und Vorgänge werden auf 0 gesetzt. Bons bleiben gespeichert.'))return;state.sales=0;state.tx=0;state.cart=[];state.activeCoupon=null;save();remoteResetDay();renderAll();toast('Neuer Kassentag gestartet','good')}
 let scanMode='checkout',scanCreateDraft=null;
 let scanStream=null,scanTimer=null,scanDetector=null,scanBusy=false,scanTick=0,scanLoopActive=false,scanTrack=null,scanTorchOn=false,zxingReader=null,zxingControls=null,zxingLoading=null,scanFrameHandle=null,scanCropCanvas=null,scanCropCtx=null,scanVideoEl=null;
 let scanLastValue='',scanLastAt=0,scanAudioCtx=null;
@@ -2916,6 +2941,315 @@ function applyRemoteSnapshot(snapshot){
   }
 }
 
+
+/* ============================================================
+   ONLINE-DATEN V3 – PRODUKTE / BILDER / COUPONS / BONS / UMSATZ
+   Supabase bleibt die zentrale Datenquelle. Warenkorb bleibt lokal
+   pro Kasse, damit mehrere Kassen gleichzeitig kassieren können.
+   ============================================================ */
+const KS_PENDING_RECEIPTS='kassenspiel-pending-receipts-v3';
+let remoteDataReady=false;
+let remotePollTimer=null;
+let remoteStateTimer=null;
+let remoteProductTimers=new Map();
+let remoteCouponTimers=new Map();
+let remotePullBusy=false;
+let remoteSeedBusy=false;
+let remoteLastPull=0;
+
+function setCloudSyncStatus(kind,text){
+  const el=document.getElementById('cloudSyncStatus');
+  if(!el)return;
+  el.classList.remove('ready','syncing','error');
+  el.classList.add(kind||'ready');
+  el.textContent=text||'☁ Online-Sync';
+}
+
+function currentRemoteCompanyId(){
+  return currentUser?.companyId||'';
+}
+
+function cleanRemoteProduct(p){
+  if(!p)return null;
+  const x={...p};
+  delete x._remotePending;
+  return x;
+}
+function cleanRemoteCoupon(c){
+  if(!c)return null;
+  const x={...c};
+  delete x._remotePending;
+  return x;
+}
+function cleanRemoteReceipt(r){
+  if(!r)return null;
+  const x=JSON.parse(JSON.stringify(r));
+  delete x._remotePending;
+  return x;
+}
+
+function readPendingReceipts(){
+  try{return JSON.parse(localStorage.getItem(KS_PENDING_RECEIPTS)||'[]')||[]}catch(e){return []}
+}
+function writePendingReceipts(list){
+  try{localStorage.setItem(KS_PENDING_RECEIPTS,JSON.stringify(list||[]))}catch(e){}
+}
+function queuePendingReceipt(r){
+  const list=readPendingReceipts();
+  if(!list.some(x=>String(x.id)===String(r.id)))list.push(cleanRemoteReceipt(r));
+  writePendingReceipts(list.slice(-500));
+}
+
+async function flushPendingReceipts(){
+  if(!ksToken()||!currentUser)return;
+  const list=readPendingReceipts();
+  if(!list.length)return;
+  const keep=[];
+  for(const r of list){
+    try{
+      const out=await ksApi('record_receipt',{receipt:cleanRemoteReceipt(r)});
+      if(out?.totals){
+        state.sales=Number(out.totals.sales)||0;
+        state.tx=Number(out.totals.tx)||0;
+      }
+    }catch(e){
+      keep.push(r);
+    }
+  }
+  writePendingReceipts(keep);
+}
+
+async function remoteUpsertProduct(p,{silent=false}={}){
+  if(!remoteDataReady||!ksToken()||!currentUser||!p)return;
+  const key=String(p.id);
+  if(remoteProductTimers.has(key))clearTimeout(remoteProductTimers.get(key));
+  remoteProductTimers.set(key,setTimeout(async()=>{
+    remoteProductTimers.delete(key);
+    try{
+      setCloudSyncStatus('syncing','☁ Produkt wird gespeichert …');
+      await ksApi('upsert_product',{product:cleanRemoteProduct(p)});
+      setCloudSyncStatus('ready','☁ Online synchronisiert');
+    }catch(e){
+      setCloudSyncStatus('error','☁ Produkt-Sync fehlgeschlagen');
+      if(!silent)toast('Produkt konnte online nicht gespeichert werden','bad');
+    }
+  },120));
+}
+
+async function remoteDeleteProduct(id){
+  if(!remoteDataReady||!ksToken()||!currentUser)return;
+  try{
+    setCloudSyncStatus('syncing','☁ Produkt wird gelöscht …');
+    await ksApi('delete_product',{localId:String(id)});
+    setCloudSyncStatus('ready','☁ Online synchronisiert');
+  }catch(e){
+    setCloudSyncStatus('error','☁ Löschen nicht synchronisiert');
+    toast(e.message||'Online-Löschen fehlgeschlagen','bad');
+  }
+}
+
+async function remoteUpsertCoupon(c,{silent=false}={}){
+  if(!remoteDataReady||!ksToken()||!currentUser||!c)return;
+  const key=normalizeCouponCode(c.code);
+  if(remoteCouponTimers.has(key))clearTimeout(remoteCouponTimers.get(key));
+  remoteCouponTimers.set(key,setTimeout(async()=>{
+    remoteCouponTimers.delete(key);
+    try{
+      setCloudSyncStatus('syncing','☁ Coupon wird gespeichert …');
+      await ksApi('upsert_coupon',{coupon:cleanRemoteCoupon(c)});
+      setCloudSyncStatus('ready','☁ Online synchronisiert');
+    }catch(e){
+      setCloudSyncStatus('error','☁ Coupon-Sync fehlgeschlagen');
+      if(!silent)toast('Coupon konnte online nicht gespeichert werden','bad');
+    }
+  },120));
+}
+
+async function remoteRecordReceipt(r){
+  if(!r)return;
+  queuePendingReceipt(r);
+  if(!ksToken()||!currentUser)return;
+  try{
+    setCloudSyncStatus('syncing','☁ Bon wird gespeichert …');
+    const out=await ksApi('record_receipt',{receipt:cleanRemoteReceipt(r)});
+    const keep=readPendingReceipts().filter(x=>String(x.id)!==String(r.id));
+    writePendingReceipts(keep);
+    if(out?.totals){
+      state.sales=Number(out.totals.sales)||0;
+      state.tx=Number(out.totals.tx)||0;
+    }
+    setCloudSyncStatus('ready','☁ Bon synchronisiert');
+  }catch(e){
+    setCloudSyncStatus('error','☁ Bon wartet auf Verbindung');
+  }
+}
+
+function scheduleRemoteCompanyStatePush(){
+  if(!remoteDataReady||!ksToken()||!currentUser)return;
+  clearTimeout(remoteStateTimer);
+  remoteStateTimer=setTimeout(async()=>{
+    try{
+      await ksApi('save_company_state',{
+        companyState:{
+          store:state.store,
+          storeType:state.storeType
+        }
+      });
+      setCloudSyncStatus('ready','☁ Online synchronisiert');
+    }catch(e){
+      setCloudSyncStatus('error','☁ Einstellungen nicht synchronisiert');
+    }
+  },450);
+}
+
+async function remoteResetDay(){
+  if(!ksToken()||!currentUser)return;
+  try{
+    const out=await ksApi('reset_day');
+    if(out?.totals){
+      state.sales=Number(out.totals.sales)||0;
+      state.tx=Number(out.totals.tx)||0;
+    }
+    setCloudSyncStatus('ready','☁ Neuer Kassentag synchronisiert');
+  }catch(e){
+    setCloudSyncStatus('error','☁ Kassentag konnte nicht synchronisiert werden');
+  }
+}
+
+async function remoteAddActivity(entry){
+  if(!remoteDataReady||!ksToken()||!currentUser||!entry)return;
+  try{
+    await ksApi('add_activity',{activity:{...entry}});
+  }catch(e){}
+}
+
+function applyRemoteCompanyData(data,{initial=false}={}){
+  if(!data)return;
+
+  const keepCart=state.cart;
+  const keepActiveCoupon=state.activeCoupon;
+  const keepCategory=state.category;
+
+  if(Array.isArray(data.products) && data.products.length){
+    state.products=data.products.map(p=>{
+      const x=normalizeWeightedProduct({...p});
+      ensureProductBarcode(x);
+      return x;
+    });
+    restoreBuiltInImages();
+  }
+
+  if(Array.isArray(data.coupons)){
+    state.coupons=data.coupons.map(c=>({...c}));
+  }
+
+  if(Array.isArray(data.receipts)){
+    state.receipts=data.receipts.map(r=>({...r}));
+  }
+
+  if(Array.isArray(data.activities)){
+    state.activityLog=data.activities.map(a=>({...a})).slice(0,500);
+  }
+
+  if(data.companyState){
+    if(data.companyState.store)state.store=data.companyState.store;
+    if(data.companyState.storeType)state.storeType=data.companyState.storeType;
+    state.sales=Number(data.companyState.sales)||0;
+    state.tx=Number(data.companyState.tx)||0;
+  }
+
+  state.cart=keepCart||[];
+  state.activeCoupon=keepActiveCoupon||null;
+  state.category=keepCategory||'Alle';
+  save();
+
+  if(!initial)renderAll();
+}
+
+async function seedRemoteCompanyDefaults(snapshot){
+  if(remoteSeedBusy)return;
+  remoteSeedBusy=true;
+  try{
+    if(!snapshot.products?.length){
+      // Alle 750 Beispielprodukte einmal zentral für diese Firma speichern.
+      const products=(state.products||[]).map(cleanRemoteProduct);
+      await ksApi('seed_products',{products});
+    }
+
+    if(!snapshot.coupons?.length){
+      await ksApi('seed_coupons',{coupons:(state.coupons||[]).map(cleanRemoteCoupon)});
+    }
+
+    // Alte lokale Bons beim ersten Umstieg ebenfalls ins Online-System übernehmen.
+    if(!snapshot.receipts?.length && Array.isArray(state.receipts) && state.receipts.length){
+      const old=[...state.receipts].slice().reverse();
+      for(const r of old.slice(-500)){
+        try{await ksApi('record_receipt',{receipt:cleanRemoteReceipt(r)})}catch(e){}
+      }
+    }
+
+    await ksApi('save_company_state',{
+      companyState:{store:state.store,storeType:state.storeType}
+    });
+  }finally{
+    remoteSeedBusy=false;
+  }
+}
+
+async function remotePullCompanyData({initial=false}={}){
+  if(remotePullBusy||!ksToken()||!currentUser)return;
+  remotePullBusy=true;
+  try{
+    setCloudSyncStatus('syncing',initial?'☁ Firmendaten werden geladen …':'☁ Synchronisiere …');
+    let out=await ksApi('data_snapshot');
+    let data=out?.data||{};
+
+    if(initial && (!data.products?.length || !data.coupons?.length)){
+      await seedRemoteCompanyDefaults(data);
+      out=await ksApi('data_snapshot');
+      data=out?.data||{};
+    }
+
+    applyRemoteCompanyData(data,{initial});
+    await flushPendingReceipts();
+    remoteLastPull=Date.now();
+    setCloudSyncStatus('ready','☁ Online synchronisiert');
+  }catch(e){
+    setCloudSyncStatus('error','☁ Offline – lokale Kasse läuft weiter');
+    if(initial)toast('Online-Daten konnten nicht geladen werden – lokale Daten bleiben verfügbar','bad');
+  }finally{
+    remotePullBusy=false;
+  }
+}
+
+async function remoteInitializeCompanyData(){
+  remoteDataReady=false;
+  await remotePullCompanyData({initial:true});
+  remoteDataReady=true;
+  startRemotePolling();
+}
+
+function startRemotePolling(){
+  stopRemotePolling();
+  remotePollTimer=setInterval(()=>{
+    if(document.visibilityState==='visible'&&currentUser&&ksToken())remotePullCompanyData();
+  },5000);
+}
+
+function stopRemotePolling(){
+  if(remotePollTimer)clearInterval(remotePollTimer);
+  remotePollTimer=null;
+}
+
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&currentUser&&ksToken()){
+    remotePullCompanyData();
+  }
+});
+window.addEventListener('focus',()=>{
+  if(currentUser&&ksToken()&&Date.now()-remoteLastPull>1800)remotePullCompanyData();
+});
+
 async function restoreRemoteSession(){
   seedExampleProducts();
   const status=document.getElementById('backendStatus');
@@ -2926,8 +3260,9 @@ async function restoreRemoteSession(){
   try{
     const out=await ksApi('snapshot');
     applyRemoteSnapshot(out);
-    document.getElementById('login').classList.add('hidden');
     currentUser=out.user;
+    await remoteInitializeCompanyData();
+    document.getElementById('login').classList.add('hidden');
     renderAll();
     if(status)status.textContent='● Online verbunden';
   }catch(e){
@@ -2949,6 +3284,7 @@ window.login=async function(){
     setKsToken(out.token);
     applyRemoteSnapshot(out);
     currentUser=out.user;
+    await remoteInitializeCompanyData();
     document.getElementById('login').classList.add('hidden');
     document.getElementById('storeChooser').classList.add('hidden');
     state.category='Alle';
@@ -2962,6 +3298,8 @@ window.login=async function(){
 }
 
 window.logout=async function(){
+  stopRemotePolling();
+  remoteDataReady=false;
   setKsToken('');
   currentUser=null;
   authData={companies:[],users:[]};
