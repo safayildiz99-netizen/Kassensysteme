@@ -336,7 +336,7 @@
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
     <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
-    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: ONLINE-SYNC-V3-13-50</div>
+    <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: LADENWECHSEL-SYNC-FIX-V5</div>
     <div class="register-actions">
       <button class="btn" onclick="openCompanyRegistration()">＋ Firmenkonto eröffnen</button>
       <button class="btn" onclick="openEmployeeRegistration()">＋ Mitarbeiterkonto selbst erstellen</button>
@@ -391,9 +391,9 @@
       <span id="hardwareScannerStatus" class="hardware-status ready">● USB/Bluetooth-Scanner bereit</span><span id="cloudSyncStatus" class="hardware-status ready">☁ Online-Sync bereit</span>
       <button class="btn" onclick="openMusic()">♫ Musik</button>
       <button class="btn" onclick="openReceipts()">▤ Käufe & Bons</button>
-      <button class="btn warn" onclick="openCoupons()">🎟 Angebote & Coupons</button>
+      <button id="couponAdminBtn" class="btn warn" onclick="openCoupons()">🎟 Angebote & Coupons</button>
       <button class="btn soft" onclick="openBarcodeForArticle()">▥ Barcode für Artikel</button>
-      <button class="btn primary" onclick="openCreateProduct()">＋ Neuer Artikel</button>
+      <button id="newProductTopBtn" class="btn primary" onclick="openCreateProduct()">＋ Neuer Artikel</button>
       <button class="btn" onclick="newDay()">↻ Neuer Kassentag</button>
     </div>
   </div>
@@ -405,7 +405,7 @@
       <div class="field barcode-wrap"><span>▥</span><input id="barcodeInput" placeholder="Barcode oder Coupon-Code" onkeydown="if(event.key==='Enter')processCode()"><button class="btn primary" onclick="processCode()">Eingeben</button><button class="btn green scan-main-btn" onclick="openScanner()">⚡ Produkt-Scan</button></div>
     </div>
     <div id="categories" class="cats"></div>
-    <div class="section-head"><h2>Produkte</h2><span class="badge" id="productCount"></span><button class="btn soft" onclick="openCreateProduct()">＋ Artikel erstellen</button></div>
+    <div class="section-head"><h2>Produkte</h2><span class="badge" id="productCount"></span><button id="newProductSectionBtn" class="btn soft" onclick="openCreateProduct()">＋ Artikel erstellen</button></div>
     <div id="products" class="products"></div>
   </section>
   <aside class="cart-pane">
@@ -629,7 +629,28 @@ const seedCoupons=[
 ];
 let state={store:'Star Markt',storeType:'Alle',products:[],cart:[],receipts:[],sales:0,tx:0,coupons:[],activeCoupon:null,category:'Alle',activityLog:[]};
 
-const STATE_KEY='kassenspiel-online-state-products-v3';
+const STATE_KEY_PREFIX='kassenspiel-online-state-products-v4';
+function stateStorageKey(){
+  return `${STATE_KEY_PREFIX}-${currentUser?.companyId||'guest'}`;
+}
+function blankStateForCurrentCompany(){
+  let co=null;
+  try{co=authData?.companies?.find(c=>c.id===currentUser?.companyId)||null}catch(e){}
+  const type=co?.type&&globalThis.__KS_STORE_CATS?.[co.type]?co.type:'Alle';
+  return {
+    store:co?.name||'Star Markt',
+    storeType:type,
+    products:[],
+    cart:[],
+    receipts:[],
+    sales:0,
+    tx:0,
+    coupons:[],
+    activeCoupon:null,
+    category:'Alle',
+    activityLog:[]
+  };
+}
 
 function restoreBuiltInImages(){
   const byBarcode=new Map(baseProducts.map(p=>[String(p.barcode),p]));
@@ -657,12 +678,24 @@ function seedExampleProducts(){
 
 function load(){
   try{
-    const raw=localStorage.getItem(STATE_KEY);
+    const raw=localStorage.getItem(stateStorageKey());
     if(raw){
       const saved=JSON.parse(raw);
       if(saved && typeof saved==='object'){
         state={...state,...saved};
       }
+    }
+  }catch(e){}
+  seedExampleProducts();
+}
+
+function loadLocalStateForCurrentCompany(){
+  state=blankStateForCurrentCompany();
+  try{
+    const raw=localStorage.getItem(stateStorageKey());
+    if(raw){
+      const saved=JSON.parse(raw);
+      if(saved && typeof saved==='object')state={...state,...saved};
     }
   }catch(e){}
   seedExampleProducts();
@@ -680,7 +713,7 @@ function save(){
         return x;
       })
     };
-    localStorage.setItem(STATE_KEY,JSON.stringify(compact));
+    localStorage.setItem(stateStorageKey(),JSON.stringify(compact));
   }catch(e){
     // Die Kasse soll auch bei vollem Browser-Speicher weiterlaufen.
   }
@@ -1496,9 +1529,16 @@ function selectStore(type){
   if(!globalThis.__KS_STORE_CATS[type])type='Alle';
   state.storeType=type;
   state.category='Alle';
+
+  // Die lokale Ladenwahl gewinnt, bis Supabase die neue Auswahl bestätigt hat.
+  // Sonst konnte der 5-Sekunden-Poll noch den alten Wert "Supermarkt" zurückspielen.
+  localStoreSelectionPendingUntil=Date.now()+12000;
+
   closeStoreChooser();
   renderAll();
   save();
+  scheduleRemoteCompanyStatePush();
+
   const count=state.products.filter(p=>productAllowed(p)).length;
   toast(`${type} geöffnet · ${count} passende Produkte`,'good');
 }
@@ -1565,7 +1605,7 @@ function productImageSearchQuery(p){
 }
 
 async function findCommonsProductImage(p){
-  const key=String(p.id||p.barcode||p.name);
+  const key=`${currentUser?.companyId||'guest'}:${String(p.id||p.barcode||p.name)}`;
   if(ksImageCache[key]) return ksImageCache[key];
 
   const search=productImageSearchQuery(p);
@@ -1782,7 +1822,7 @@ function productCard(p){
       <div class="prod-name" title="${esc(p.name)}">${esc(p.name)}</div>
       <div class="prod-meta">${p.weighted?(p.weightUnit==='L'?'Flüssigkeit · Preis pro Liter':'Wiegeartikel · Preis pro kg'):esc(p.unit||'Stück')} · #${esc(p.barcode)}</div>
       ${p.weighted?`<div class="weight-chip">⚖ Menge erst an der Kasse eingeben · ${p.weightUnit==='L'?'ml / L':'g / kg'}</div>`:''}
-      <div class="prod-bottom"><div class="price">${p.weighted?`${euro(weightedRate(p))} / ${p.weightUnit}`:euro(p.price)}</div><div class="prod-btns"><button class="icon-btn" title="Bearbeiten" onclick="event.stopPropagation();editProduct(${p.id})">✎</button></div></div>
+      <div class="prod-bottom"><div class="price">${p.weighted?`${euro(weightedRate(p))} / ${p.weightUnit}`:euro(p.price)}</div><div class="prod-btns">${isOwner()?`<button class="icon-btn" title="Bearbeiten" onclick="event.stopPropagation();editProduct(${p.id})">✎</button>`:''}</div></div>
       <div class="barcode-label" onclick="event.stopPropagation()" title="EAN-Barcode">${barcodeSvg(p.barcode)}</div>
       <div class="prod-tap">${p.weighted?(p.weightUnit==='L'?'Antippen → ml / Liter eingeben':'Antippen → g / kg eingeben'):'Antippen → direkt hinzufügen'}</div>
     </div>
@@ -2157,7 +2197,7 @@ function printReceipts(ids){const receipts=ids.map(id=>state.receipts.find(r=>r.
 
 
 </body></html>`);w.document.close()}
-function openCoupons(){modal('Angebote & Coupons',`<div class="helper" style="margin-bottom:12px">Zeitungscoupons werden mit Zahlencodes eingelöst, zum Beispiel wie ein Barcode-Code: 8005 2364.</div><div class="coupon-grid">${state.coupons.map(c=>`<div class="coupon-card"><div class="code">${esc(c.code)}</div><small>${esc(c.label)}${c.min?` · ab ${euro(c.min)}`:''}</small><div class="pill">${c.active?'AKTIV':'INAKTIV'}</div></div>`).join('')}</div><div class="hr"></div><h4 style="margin:0 0 10px">Neuen Zeitungscoupon anlegen</h4><div class="form-row"><div class="form-group"><label>Code</label><input id="newCouponCode" placeholder="z. B. 8005 2364" oninput="this.value=formatCouponCode(this.value)"></div><div class="form-group"><label>Rabattart</label><select id="newCouponType"><option value="fixed">Fester Betrag €</option><option value="percent">Prozent %</option></select></div></div><div class="form-row"><div class="form-group"><label>Wert</label><input id="newCouponValue" inputmode="decimal" placeholder="10"></div><div class="form-group"><label>Mindest-Einkauf €</label><input id="newCouponMin" inputmode="decimal" value="0"></div></div>`,`<button class="btn" onclick="closeModal()">Schließen</button><button class="btn green" onclick="createCoupon()">Coupon aktivieren</button>`)}
+function openCoupons(){if(!isOwner())return toast('Nur Firmen-Admin oder Groß-Admin darf Coupons verwalten','bad');modal('Angebote & Coupons',`<div class="helper" style="margin-bottom:12px">Zeitungscoupons werden mit Zahlencodes eingelöst, zum Beispiel wie ein Barcode-Code: 8005 2364.</div><div class="coupon-grid">${state.coupons.map(c=>`<div class="coupon-card"><div class="code">${esc(c.code)}</div><small>${esc(c.label)}${c.min?` · ab ${euro(c.min)}`:''}</small><div class="pill">${c.active?'AKTIV':'INAKTIV'}</div></div>`).join('')}</div><div class="hr"></div><h4 style="margin:0 0 10px">Neuen Zeitungscoupon anlegen</h4><div class="form-row"><div class="form-group"><label>Code</label><input id="newCouponCode" placeholder="z. B. 8005 2364" oninput="this.value=formatCouponCode(this.value)"></div><div class="form-group"><label>Rabattart</label><select id="newCouponType"><option value="fixed">Fester Betrag €</option><option value="percent">Prozent %</option></select></div></div><div class="form-row"><div class="form-group"><label>Wert</label><input id="newCouponValue" inputmode="decimal" placeholder="10"></div><div class="form-group"><label>Mindest-Einkauf €</label><input id="newCouponMin" inputmode="decimal" value="0"></div></div>`,`<button class="btn" onclick="closeModal()">Schließen</button><button class="btn green" onclick="createCoupon()">Coupon aktivieren</button>`)}
 function createCoupon(){
   const raw=document.getElementById('newCouponCode').value.trim();
   const code=formatCouponCode(raw);
@@ -2283,7 +2323,7 @@ function createProduct(){
   toast(p.weighted?(p.weightUnit==='L'?'Flüssigkeitsartikel erstellt – Menge wird beim Kassieren eingegeben':'Wiegeartikel erstellt – Gewicht wird beim Kassieren eingegeben'):'Artikel erstellt','good');
   if(__createFromScan){__createFromScan=false;setTimeout(()=>addProduct(p.id),70)}
 }
-function editProduct(id){
+function editProduct(id){if(!isOwner())return toast('Nur Firmen-Admin oder Groß-Admin darf Artikel bearbeiten','bad');
   const p=state.products.find(x=>x.id===id);
   modal('Artikel bearbeiten',`
     <div class="form-group"><label>Name</label><input id="epName" value="${escAttr(p.name)}"></div>
@@ -2875,6 +2915,11 @@ function renderUserActions(){
   if(superBtn)superBtn.classList.toggle('hidden',!isSuperAdmin());
   if(dash)dash.classList.toggle('hidden',!(isSuperAdmin()||isCompanyAdmin()));
   if(acc)acc.classList.toggle('hidden',!(isSuperAdmin()||isCompanyAdmin()));
+  const owner=isOwner();
+  ['couponAdminBtn','newProductTopBtn','newProductSectionBtn'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.classList.toggle('hidden',!owner);
+  });
 }
 function renderHeader(){
   const co=activeCompany();
@@ -2947,8 +2992,12 @@ function applyRemoteSnapshot(snapshot){
    Supabase bleibt die zentrale Datenquelle. Warenkorb bleibt lokal
    pro Kasse, damit mehrere Kassen gleichzeitig kassieren können.
    ============================================================ */
-const KS_PENDING_RECEIPTS='kassenspiel-pending-receipts-v3';
+const KS_PENDING_RECEIPTS_PREFIX='kassenspiel-pending-receipts-v4';
+function pendingReceiptsKey(){
+  return `${KS_PENDING_RECEIPTS_PREFIX}-${currentRemoteCompanyId()||'guest'}`;
+}
 let remoteDataReady=false;
+let localStoreSelectionPendingUntil=0;
 let remotePollTimer=null;
 let remoteStateTimer=null;
 let remoteProductTimers=new Map();
@@ -2989,10 +3038,10 @@ function cleanRemoteReceipt(r){
 }
 
 function readPendingReceipts(){
-  try{return JSON.parse(localStorage.getItem(KS_PENDING_RECEIPTS)||'[]')||[]}catch(e){return []}
+  try{return JSON.parse(localStorage.getItem(pendingReceiptsKey())||'[]')||[]}catch(e){return []}
 }
 function writePendingReceipts(list){
-  try{localStorage.setItem(KS_PENDING_RECEIPTS,JSON.stringify(list||[]))}catch(e){}
+  try{localStorage.setItem(pendingReceiptsKey(),JSON.stringify(list||[]))}catch(e){}
 }
 function queuePendingReceipt(r){
   const list=readPendingReceipts();
@@ -3089,17 +3138,27 @@ function scheduleRemoteCompanyStatePush(){
   clearTimeout(remoteStateTimer);
   remoteStateTimer=setTimeout(async()=>{
     try{
+      const selectedStoreType=state.storeType;
       await ksApi('save_company_state',{
         companyState:{
           store:state.store,
-          storeType:state.storeType
+          storeType:selectedStoreType
         }
       });
-      setCloudSyncStatus('ready','☁ Online synchronisiert');
+
+      // Nur freigeben, wenn der Nutzer während des Speicherns nicht schon
+      // wieder auf einen anderen Laden gewechselt hat.
+      if(state.storeType===selectedStoreType){
+        localStoreSelectionPendingUntil=0;
+      }
+      setCloudSyncStatus('ready','☁ Ladenwahl online gespeichert');
     }catch(e){
-      setCloudSyncStatus('error','☁ Einstellungen nicht synchronisiert');
+      // Lokale Auswahl nicht direkt wieder verlieren. Nach 60 Sekunden darf
+      // erneut ein Server-Snapshot übernehmen, falls die Verbindung dauerhaft weg ist.
+      localStoreSelectionPendingUntil=Math.max(localStoreSelectionPendingUntil,Date.now()+60000);
+      setCloudSyncStatus('error','☁ Ladenwahl lokal – Online-Sync fehlgeschlagen');
     }
-  },450);
+  },180);
 }
 
 async function remoteResetDay(){
@@ -3130,7 +3189,7 @@ function applyRemoteCompanyData(data,{initial=false}={}){
   const keepActiveCoupon=state.activeCoupon;
   const keepCategory=state.category;
 
-  if(Array.isArray(data.products) && data.products.length){
+  if(Array.isArray(data.products)){
     state.products=data.products.map(p=>{
       const x=normalizeWeightedProduct({...p});
       ensureProductBarcode(x);
@@ -3153,7 +3212,16 @@ function applyRemoteCompanyData(data,{initial=false}={}){
 
   if(data.companyState){
     if(data.companyState.store)state.store=data.companyState.store;
-    if(data.companyState.storeType)state.storeType=data.companyState.storeType;
+
+    // Während eine gerade gewählte Ladenart noch zu Supabase geschrieben wird,
+    // darf ein älterer 5-Sekunden-Snapshot sie NICHT überschreiben.
+    if(
+      data.companyState.storeType &&
+      Date.now()>=localStoreSelectionPendingUntil
+    ){
+      state.storeType=data.companyState.storeType;
+    }
+
     state.sales=Number(data.companyState.sales)||0;
     state.tx=Number(data.companyState.tx)||0;
   }
@@ -3178,14 +3246,6 @@ async function seedRemoteCompanyDefaults(snapshot){
 
     if(!snapshot.coupons?.length){
       await ksApi('seed_coupons',{coupons:(state.coupons||[]).map(cleanRemoteCoupon)});
-    }
-
-    // Alte lokale Bons beim ersten Umstieg ebenfalls ins Online-System übernehmen.
-    if(!snapshot.receipts?.length && Array.isArray(state.receipts) && state.receipts.length){
-      const old=[...state.receipts].slice().reverse();
-      for(const r of old.slice(-500)){
-        try{await ksApi('record_receipt',{receipt:cleanRemoteReceipt(r)})}catch(e){}
-      }
     }
 
     await ksApi('save_company_state',{
@@ -3261,6 +3321,7 @@ async function restoreRemoteSession(){
     const out=await ksApi('snapshot');
     applyRemoteSnapshot(out);
     currentUser=out.user;
+    loadLocalStateForCurrentCompany();
     await remoteInitializeCompanyData();
     document.getElementById('login').classList.add('hidden');
     renderAll();
@@ -3284,6 +3345,7 @@ window.login=async function(){
     setKsToken(out.token);
     applyRemoteSnapshot(out);
     currentUser=out.user;
+    loadLocalStateForCurrentCompany();
     await remoteInitializeCompanyData();
     document.getElementById('login').classList.add('hidden');
     document.getElementById('storeChooser').classList.add('hidden');
