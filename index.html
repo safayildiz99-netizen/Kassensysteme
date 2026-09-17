@@ -92,6 +92,7 @@
   .store-visual b{position:relative;z-index:1;line-height:1}
   .store-option strong{display:block;color:#10223b;font-size:18px;margin-bottom:8px}
   .store-option span{display:block;color:#71839a;font-size:12px;line-height:1.45}
+  .store-option .store-product-count{display:inline-block;margin-top:10px;padding:5px 9px;border-radius:999px;background:#e9f8f2;color:#087d58;font-size:10px;font-style:normal;font-weight:900}
   .store-tanke{background:linear-gradient(135deg,#ef5350,#b71c1c)}
   .store-supermarkt{background:linear-gradient(135deg,#1ea971,#0b6c57)}
   .store-spielzeugladen{background:linear-gradient(135deg,#f5b041,#d35400)}
@@ -692,25 +693,12 @@ function restoreBuiltInImages(){
 }
 
 function seedExampleProducts(){
-  // Neue Firmen/Läden beginnen bewusst leer. Nur der eingebaute Star-Markt
-  // behält die Demoartikel zum sofortigen Spielen.
-  const demoCompany=!currentUser || currentUser.companyId==='company-star';
-  if(!demoCompany){
-    state.products=(state.products||[]).filter(p=>{
-      if(p.generated)return false;
-      return !baseProducts.some(b=>String(b.barcode)===String(p.barcode)&&b.name===p.name);
-    });
-    state.catalogVersion=CATALOG_VERSION;
-    if(!Array.isArray(state.coupons)||!state.coupons.length)state.coupons=seedCoupons.map(c=>({...c}));
-    return;
-  }
-  // Die echten Beispielartikel zuerst übernehmen.
-  if(!Array.isArray(state.products) || !state.products.length){
-    state.products=baseProducts.map(p=>normalizeWeightedProduct({...p}));
-  }
-  // Danach jede Kategorie auf 50 unterschiedliche Artikel auffüllen.
-  ensureCatalog50();
-  restoreBuiltInImages();
+  // Jeder Geschäftstyp startet leer. Nur selbst erstellte/gescannte Artikel bleiben.
+  state.products=(state.products||[]).filter(p=>{
+    if(p.generated)return false;
+    return !baseProducts.some(b=>String(b.barcode)===String(p.barcode)&&b.name===p.name);
+  });
+  state.catalogVersion=CATALOG_VERSION;
   if(!Array.isArray(state.coupons) || !state.coupons.length){
     state.coupons=seedCoupons.map(c=>({...c}));
   }
@@ -1557,10 +1545,23 @@ function logout(){
 }
 function showStoreChooser(){
   document.getElementById('storeChooser').classList.remove('hidden');
+  refreshStoreChooserCounts();
   requestAnimationFrame(()=>{
     document.querySelectorAll('.store-option').forEach(b=>b.classList.remove('selected'));
     const btn=[...document.querySelectorAll('.store-option')].find(b=>b.getAttribute('onclick')?.includes(`'${state.storeType}'`));
     if(btn)btn.classList.add('selected');
+  });
+}
+function refreshStoreChooserCounts(){
+  document.querySelectorAll('.store-option').forEach(btn=>{
+    const raw=btn.getAttribute('onclick')||'';
+    const type=(raw.match(/selectStore\('([^']+)'\)/)||[])[1];
+    if(!type)return;
+    const cats=globalThis.__KS_STORE_CATS[type]||[];
+    const count=type==='Alle'?(state.products||[]).length:(state.products||[]).filter(p=>cats.includes(p.cat)).length;
+    let badge=btn.querySelector('.store-product-count');
+    if(!badge){badge=document.createElement('em');badge.className='store-product-count';btn.appendChild(badge)}
+    badge.textContent=count===0?(type==='Alle'?'0 Produkte':`Neuer ${type} · 0 Produkte`):`${count} Produkt${count===1?'':'e'}`;
   });
 }
 function closeStoreChooser(){document.getElementById('storeChooser').classList.add('hidden')}
@@ -1580,7 +1581,7 @@ function selectStore(type){
   scheduleRemoteCompanyStatePush();
 
   const count=state.products.filter(p=>productAllowed(p)).length;
-  toast(`${type} geöffnet · ${count} passende Produkte`,'good');
+  toast(count?`${type} geöffnet · ${count} passende Produkte`:(type==='Alle'?'Alle Läden · 0 Produkte – jetzt erstes Produkt scannen':`Neuer ${type} geöffnet · 0 Produkte – jetzt erstes Produkt scannen`),'good');
 }
 const CATEGORY_GROUPS=[
   {label:'Supermarkt',cats:['Kühlregal','Obst & Gemüse','Backwaren','Getränke','Vorrat','Süßes']},
@@ -3301,9 +3302,7 @@ function applyRemoteCompanyData(data,{initial=false}={}){
       ensureProductBarcode(x);
       return x;
     });
-    if(currentUser?.companyId!=='company-star'){
-      state.products=state.products.filter(p=>!p.generated&&!baseProducts.some(b=>String(b.barcode)===String(p.barcode)&&b.name===p.name));
-    }
+    state.products=state.products.filter(p=>!p.generated&&!baseProducts.some(b=>String(b.barcode)===String(p.barcode)&&b.name===p.name));
     restoreBuiltInImages();
   }
 
@@ -3347,11 +3346,8 @@ async function seedRemoteCompanyDefaults(snapshot){
   if(remoteSeedBusy)return;
   remoteSeedBusy=true;
   try{
-    if(!snapshot.products?.length && currentUser?.companyId==='company-star'){
-      // Alle 750 Beispielprodukte einmal zentral für diese Firma speichern.
-      const products=(state.products||[]).map(cleanRemoteProduct);
-      await ksApi('seed_products',{products});
-    }
+    // Neue Firmen und neue Geschäftstypen werden absichtlich nicht mit
+    // Demoartikeln gefüllt. Produkte entstehen erst durch Scan/Erstellung.
 
     if(!snapshot.coupons?.length){
       await ksApi('seed_coupons',{coupons:(state.coupons||[]).map(cleanRemoteCoupon)});
