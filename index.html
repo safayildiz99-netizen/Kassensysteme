@@ -2818,14 +2818,13 @@ async function startZXingScanner(video){
 
 async function startScanner(){
   try{
-    // 1280x720 is intentionally preferred over 1920x1080:
-    // barcode decoding is noticeably quicker and still sharp enough.
+    // Weniger Pixel pro Frame beschleunigen die Erkennung auf Handys.
     scanStream=await navigator.mediaDevices.getUserMedia({
       video:{
         facingMode:{ideal:'environment'},
-        width:{ideal:1280,max:1920},
-        height:{ideal:720,max:1080},
-        frameRate:{ideal:60,min:30}
+        width:{ideal:960,max:1280},
+        height:{ideal:540,max:720},
+        frameRate:{ideal:60,min:24}
       },
       audio:false
     });
@@ -2851,7 +2850,7 @@ async function startScanner(){
           advanced.push({exposureMode:'continuous'});
         }
         if(caps.zoom && Number.isFinite(caps.zoom.min) && Number.isFinite(caps.zoom.max) && caps.zoom.max>caps.zoom.min){
-          const zoom=Math.min(caps.zoom.max,Math.max(caps.zoom.min,caps.zoom.min+(caps.zoom.max-caps.zoom.min)*0.12));
+          const zoom=Math.min(caps.zoom.max,Math.max(caps.zoom.min,caps.zoom.min+(caps.zoom.max-caps.zoom.min)*0.18));
           advanced.push({zoom});
         }
         if(advanced.length)await scanTrack.applyConstraints({advanced});
@@ -2951,17 +2950,17 @@ async function detectFastFrame(){
   try{
     let target=v;
 
-    // Alternate full frame / central barcode strip.
-    // Only ONE detector call per camera frame keeps latency very low.
-    if(scanTick%2===0 && scanCropCanvas && scanCropCtx){
+    // Meist nur den grünen Barcode-Bereich prüfen; jeder fünfte Frame
+    // bleibt eine Vollbild-Suche. Pro Frame gibt es nur einen Detector-Aufruf.
+    if(scanTick%5!==0 && scanCropCanvas && scanCropCtx){
       const vw=v.videoWidth,vh=v.videoHeight;
       const sx=Math.floor(vw*.04);
       const sy=Math.floor(vh*.23);
       const sw=Math.floor(vw*.92);
       const sh=Math.floor(vh*.54);
 
-      const targetW=Math.min(820,sw);
-      const targetH=Math.max(240,Math.round(targetW*(sh/sw)));
+      const targetW=Math.min(640,sw);
+      const targetH=Math.max(190,Math.round(targetW*(sh/sw)));
       if(scanCropCanvas.width!==targetW||scanCropCanvas.height!==targetH){
         scanCropCanvas.width=targetW;
         scanCropCanvas.height=targetH;
