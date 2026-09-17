@@ -2877,8 +2877,11 @@ async function startScanner(){
     scanCropCtx=scanCropCanvas.getContext('2d',{alpha:false,willReadFrequently:false});
 
     if(scanDetector){
-      scannerStatus('⚡ SUPER-BLITZSCAN aktiv – jeder Kameraframe wird sofort geprüft …');
+      scannerStatus('⚡ DOPPEL-SCAN aktiv – Barcode wird gleichzeitig auf zwei Wegen gelesen …');
       startNativeFrameScanner(v);
+      // Manche Android-/iPhone-Kameras melden BarcodeDetector, erkennen damit
+      // aber sehr langsam. ZXing liest deshalb parallel denselben Videostream.
+      startZXingScanner(v).catch(()=>{});
     }else{
       scannerStatus('⚡ SUPER-BLITZSCAN startet …');
       await startZXingScanner(v);
@@ -3693,7 +3696,7 @@ window.openAccountsEntry=function(){
 </style>
 <script>
 /* KASSENSPIEL MOBILE-SELLER V8 – additive Erweiterungen */
-const KS_V8='MOBILE-SELLER-V8';
+const KS_V8='MOBILE-SELLER-V10-DOPPELSCAN';
 
 function storeProfile(type=state.storeType){
   state.storeProfiles=state.storeProfiles||{};
@@ -3814,6 +3817,8 @@ scheduleRemoteCompanyStatePush=function(){_scheduleRemoteCompanyStatePushV7();if
 const _applyRemoteCompanyDataV7=applyRemoteCompanyData;
 applyRemoteCompanyData=function(data,opts={}){_applyRemoteCompanyDataV7(data,opts);if(data?.companyState){if(Array.isArray(data.companyState.customStores))state.customStores=data.companyState.customStores;if(data.companyState.storeProfiles&&typeof data.companyState.storeProfiles==='object')state.storeProfiles=data.companyState.storeProfiles;save();if(!opts.initial)renderAll()}};
 
+// Scannerbibliothek bereits beim App-Start laden, nicht erst nach Öffnen der Kamera.
+setTimeout(()=>{try{ensureZXing()}catch(e){}},100);
 installV8Buttons();renderAll();
 </script>
 
