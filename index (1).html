@@ -733,6 +733,9 @@ function seedExampleProducts(){
   // Nur selbst erstellte Läden starten leer.
   state.customStores=Array.isArray(state.customStores)?state.customStores:[];
   state.products=mergeDefaultProducts(state.products);
+  // Alte sechsstellige Demo-Nummern waren keine scanbaren Barcodes.
+  // Sie werden einmalig zu gültigen EAN-13-Codes migriert.
+  state.products.forEach(p=>ensureProductBarcode(p));
   state.catalogVersion=CATALOG_VERSION;
   if(!Array.isArray(state.coupons) || !state.coupons.length){
     state.coupons=seedCoupons.map(c=>({...c}));
@@ -904,11 +907,28 @@ function isValidEAN8(code){
   return s.length===8 && s.slice(-1)===ean8Check(s.slice(0,7));
 }
 function ensureProductBarcode(p){
-  const raw=String(p.barcode||'').replace(/\D/g,'');
-  if(raw.length===13&&isValidEAN13(raw)){p.barcode=raw;return p}
-  if(raw.length===8&&isValidEAN8(raw)){p.barcode=raw;return p}
+  const original=String(p.barcode||'').trim();
+  const raw=original.replace(/\D/g,'');
+  if(/^\d{13}$/.test(original)&&isValidEAN13(original)){p.barcode=original;return p}
+  if(/^\d{12}$/.test(original)&&isValidEAN13('0'+original)){p.barcode='0'+original;return p}
+  if(/^\d{8}$/.test(original)&&isValidEAN8(original)){p.barcode=original;return p}
+  // Echte Code-128/Code-39-Werte dürfen niemals durch eine erfundene EAN
+  // ersetzt werden. Nur die alten 6-stelligen Demo-Codes werden migriert.
+  if(original && !/^\d{6}$/.test(original)){p.barcode=original;return p}
   p.barcode=makeProductEAN(p.id);
   return p;
+}
+
+function barcodeVariants(value){
+  const raw=String(value||'').trim();
+  const out=new Set([raw]);
+  if(/^\d{12}$/.test(raw))out.add('0'+raw);
+  if(/^0\d{12}$/.test(raw))out.add(raw.slice(1));
+  return out;
+}
+function findProductByBarcode(value){
+  const wanted=barcodeVariants(value);
+  return state.products.find(p=>productAllowed(p)&&[...barcodeVariants(p.barcode)].some(x=>wanted.has(x)));
 }
 
 const EAN_L=['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
@@ -2217,7 +2237,7 @@ function printSelectedArticleBarcode(){
 function processCode(){
   const el=document.getElementById('barcodeInput'),code=el.value.trim();
   if(!code)return;
-  const p=state.products.find(x=>x.barcode===code&&productAllowed(x));
+  const p=findProductByBarcode(code);
   if(p){addProduct(p.id);el.value='';return}
   const c=state.coupons.find(x=>normalizeCouponCode(x.code)===normalizeCouponCode(code)&&x.active);
   if(c){applyCoupon(c);el.value='';return}
@@ -2462,7 +2482,7 @@ function createProduct(){
   if(!name||!isFinite(price)||price<0){toast('Bitte Name und gültigen Preis ausfüllen','bad');return}
   const id=Math.max(0,...state.products.map(p=>Number(p.id)||0))+1;
   if(!barcode)barcode=makeProductEAN(id);
-  if(state.products.some(x=>x.barcode===barcode&&productAllowed(x))){toast('Dieser Barcode ist in diesem Laden bereits einem Artikel zugeordnet','bad');return}
+  if(findProductByBarcode(barcode)){toast('Dieser Barcode ist in diesem Laden bereits einem Artikel zugeordnet','bad');return}
   const p={
     id,name,cat:document.getElementById('npCat').value,price,
     costPrice:isFinite(costPrice)&&costPrice>=0?+costPrice.toFixed(2):+(price*.70).toFixed(2),
@@ -2699,7 +2719,7 @@ function acceptScannedCode(val){
   if(val===scanLastValue && now-scanLastAt<160)return true;
   scanLastValue=val;scanLastAt=now;
 
-  const p=state.products.find(x=>x.barcode===val&&productAllowed(x));
+  const p=findProductByBarcode(val);
   const c=state.coupons.find(x=>normalizeCouponCode(x.code)===normalizeCouponCode(val)&&x.active);
   const receipt=state.receipts.find(x=>String(x.receiptCode||receiptBarcode(x))===String(val)||String(x.id)===String(val));
 
@@ -3742,7 +3762,7 @@ window.openAccountsEntry=function(){
 </style>
 <script>
 /* KASSENSPIEL MOBILE-SELLER V8 – additive Erweiterungen */
-const KS_V8='MOBILE-SELLER-V11-MEHRFACHSCAN';
+const KS_V8='MOBILE-SELLER-V12-SUPERMARKTSCAN';
 
 function storeProfile(type=state.storeType){
   state.storeProfiles=state.storeProfiles||{};
