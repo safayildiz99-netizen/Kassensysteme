@@ -2479,11 +2479,11 @@ function openScanner(mode='checkout',draft=null){
       <div id="scanFlash" class="scan-flash"></div>
       <div class="scan-frame"><span class="scan-corner"></span></div>
       <div class="scan-line"></div>
-      <button class="scan-center-btn" onclick="manualDetectFrame()">◎ Jetzt erkennen</button><button id="scanTorchBtn" class="scan-torch-btn" onclick="toggleScannerTorch()">🔦 Licht</button>
-      <div class="scan-hint">Barcode vollständig in den Rahmen · Kamera ruhig halten</div>
+      <button id="scanTorchBtn" class="scan-torch-btn" onclick="toggleScannerTorch()">🔦 Licht</button>
+      <div class="scan-hint">⚡ Automatik aktiv – Barcode nur in den Rahmen halten</div>
     </div>
     <div id="scanStatus" class="scan-status">Schnellscan startet …</div>
-    <div class="scan-info">⚡ SUPER-BLITZSCAN: Jeder neue Kameraframe wird geprüft. EAN-13, EAN-8 und normale Produktbarcodes werden sofort übernommen.</div>
+    <div class="scan-info">⚡ Kein Knopfdruck nötig: Jeder neue Kameraframe wird automatisch geprüft. Nach der Erkennung ertönt sofort ein Bip.</div>
     <div id="scanUnknown" class="scan-unknown">
       <b>Unbekannter Barcode erkannt</b>
       <div class="row"><code id="scanUnknownCode"></code><button class="btn green" onclick="createUnknownFromScanner()">＋ Artikel anlegen</button></div>
@@ -2813,11 +2813,8 @@ async function startScanner(){
     scanCropCtx=scanCropCanvas.getContext('2d',{alpha:false,willReadFrequently:false});
 
     if(scanDetector){
-      scannerStatus('⚡ SUPER-BLITZSCAN aktiv – Doppelerkennung läuft …');
+      scannerStatus('⚡ SUPER-BLITZSCAN aktiv – jeder Kameraframe wird sofort geprüft …');
       startNativeFrameScanner(v);
-      // ZXing parallel starten: Das war die schnelle, zuverlässige Kombination
-      // aus der vorherigen Version und hilft besonders bei schrägen EAN-Codes.
-      startZXingScanner(v);
     }else{
       scannerStatus('⚡ SUPER-BLITZSCAN startet …');
       await startZXingScanner(v);
