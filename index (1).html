@@ -2527,7 +2527,7 @@ function saveStore(){state.store=document.getElementById('storeName').value.trim
 function switchStore(){showStoreChooser()}
 function newDay(){if(!confirm('Neuen Kassentag starten? Tagesumsatz und Vorgänge werden auf 0 gesetzt. Bons bleiben gespeichert.'))return;state.sales=0;state.tx=0;state.cart=[];state.activeCoupon=null;save();remoteResetDay();renderAll();toast('Neuer Kassentag gestartet','good')}
 let scanMode='checkout',scanCreateDraft=null;
-let scanStream=null,scanTimer=null,scanDetector=null,scanBusy=false,scanTick=0,scanLoopActive=false,scanTrack=null,scanTorchOn=false,zxingReader=null,zxingControls=null,zxingLoading=null,scanFrameHandle=null,scanCropCanvas=null,scanCropCtx=null,scanVideoEl=null;
+let scanStream=null,scanTimer=null,scanDetector=null,scanBusy=false,scanTick=0,scanLoopActive=false,scanTrack=null,scanTorchOn=false,zxingReader=null,zxingControls=null,zxingLoading=null,scanFrameHandle=null,scanCropCanvas=null,scanCropCtx=null,scanVideoEl=null,quaggaLoading=null,quaggaTimer=null,quaggaBusy=false;
 let scanLastValue='',scanLastAt=0,scanAudioCtx=null;
 
 function openScanner(mode='checkout',draft=null){
@@ -2786,6 +2786,49 @@ async function ensureZXing(){
   return zxingLoading;
 }
 
+async function ensureQuagga(){
+  if(window.Quagga?.decodeSingle)return true;
+  if(quaggaLoading)return quaggaLoading;
+  quaggaLoading=new Promise(resolve=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.12.0/dist/quagga.min.js';
+    s.async=true;
+    s.onload=()=>resolve(!!window.Quagga?.decodeSingle);
+    s.onerror=()=>resolve(false);
+    document.head.appendChild(s);
+  });
+  return quaggaLoading;
+}
+
+async function startQuaggaFallback(){
+  const ok=await ensureQuagga();
+  if(!ok||!scanLoopActive)return false;
+  const run=()=>{
+    if(!scanLoopActive)return;
+    if(!quaggaBusy&&scanVideoEl?.videoWidth){
+      quaggaBusy=true;
+      const v=scanVideoEl,vw=v.videoWidth,vh=v.videoHeight;
+      const c=document.createElement('canvas');
+      const sx=Math.floor(vw*.03),sy=Math.floor(vh*.18),sw=Math.floor(vw*.94),sh=Math.floor(vh*.64);
+      c.width=Math.min(900,sw);c.height=Math.max(240,Math.round(c.width*sh/sw));
+      c.getContext('2d',{alpha:false}).drawImage(v,sx,sy,sw,sh,0,0,c.width,c.height);
+      window.Quagga.decodeSingle({
+        src:c.toDataURL('image/jpeg',.86),locate:true,
+        inputStream:{size:900},
+        locator:{patchSize:'medium',halfSample:true},
+        decoder:{readers:['ean_reader','ean_8_reader','upc_reader','upc_e_reader','code_128_reader','code_39_reader']}
+      },result=>{
+        quaggaBusy=false;
+        const val=result?.codeResult?.code||'';
+        if(val)acceptScannedCode(val);
+      });
+    }
+    quaggaTimer=setTimeout(run,220);
+  };
+  run();
+  return true;
+}
+
 async function startZXingScanner(video){
   const ok=await ensureZXing();
   if(!ok||!video||!document.body.contains(video)){
@@ -2877,7 +2920,7 @@ async function startScanner(){
     scanCropCtx=scanCropCanvas.getContext('2d',{alpha:false,willReadFrequently:false});
 
     if(scanDetector){
-      scannerStatus('⚡ DOPPEL-SCAN aktiv – Barcode wird gleichzeitig auf zwei Wegen gelesen …');
+      scannerStatus('⚡ MEHRFACH-SCAN aktiv – Barcode wird gleichzeitig auf mehreren Wegen gelesen …');
       startNativeFrameScanner(v);
       // Manche Android-/iPhone-Kameras melden BarcodeDetector, erkennen damit
       // aber sehr langsam. ZXing liest deshalb parallel denselben Videostream.
@@ -2886,6 +2929,7 @@ async function startScanner(){
       scannerStatus('⚡ SUPER-BLITZSCAN startet …');
       await startZXingScanner(v);
     }
+    startQuaggaFallback().catch(()=>{});
   }catch(e){
     scannerStatus('Kamera konnte nicht geöffnet werden. Bitte Kamerazugriff erlauben.');
     toast('Kamera konnte nicht geöffnet werden','bad');
@@ -3061,6 +3105,8 @@ async function detectMultipleVariants(force=true){
 
 function stopScanner(){
   scanLoopActive=false;
+  if(quaggaTimer)clearTimeout(quaggaTimer);
+  quaggaTimer=null;quaggaBusy=false;
   if(scanTimer){clearTimeout(scanTimer);clearInterval(scanTimer)}
   if(scanVideoEl && scanFrameHandle!=null && typeof scanVideoEl.cancelVideoFrameCallback==='function'){
     try{scanVideoEl.cancelVideoFrameCallback(scanFrameHandle)}catch(e){}
@@ -3696,7 +3742,7 @@ window.openAccountsEntry=function(){
 </style>
 <script>
 /* KASSENSPIEL MOBILE-SELLER V8 – additive Erweiterungen */
-const KS_V8='MOBILE-SELLER-V10-DOPPELSCAN';
+const KS_V8='MOBILE-SELLER-V11-MEHRFACHSCAN';
 
 function storeProfile(type=state.storeType){
   state.storeProfiles=state.storeProfiles||{};
@@ -3818,7 +3864,7 @@ const _applyRemoteCompanyDataV7=applyRemoteCompanyData;
 applyRemoteCompanyData=function(data,opts={}){_applyRemoteCompanyDataV7(data,opts);if(data?.companyState){if(Array.isArray(data.companyState.customStores))state.customStores=data.companyState.customStores;if(data.companyState.storeProfiles&&typeof data.companyState.storeProfiles==='object')state.storeProfiles=data.companyState.storeProfiles;save();if(!opts.initial)renderAll()}};
 
 // Scannerbibliothek bereits beim App-Start laden, nicht erst nach Öffnen der Kamera.
-setTimeout(()=>{try{ensureZXing()}catch(e){}},100);
+setTimeout(()=>{try{ensureZXing();ensureQuagga()}catch(e){}},100);
 installV8Buttons();renderAll();
 </script>
 
