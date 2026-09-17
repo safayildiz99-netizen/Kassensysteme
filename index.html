@@ -326,6 +326,18 @@
 #cloudSyncStatus.error{background:#ffe8e8;color:#b33030;border-color:#efb7b7}
 #cloudSyncStatus.ready{background:#e7f7ef;color:#087d58;border-color:#b9e8d3}
 
+.mde-dock{display:none}
+@media(max-width:1024px){
+  .mobile-cart-bar{display:none!important}
+  .mde-dock{display:grid;grid-template-columns:1.1fr .8fr 1fr;gap:7px;position:fixed;z-index:88;left:7px;right:7px;bottom:max(7px,env(safe-area-inset-bottom));padding:7px;background:#071b2d;border:1px solid rgba(255,255,255,.16);border-radius:18px;box-shadow:0 12px 34px rgba(0,0,0,.35)}
+  .mde-dock button{border:0;border-radius:12px;min-height:56px;color:#fff;font-weight:900;font-size:12px;background:#183b55;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
+  .mde-dock button span{font-size:20px;line-height:1}
+  .mde-dock .mde-scan{background:#0aad78}
+  .mde-dock .mde-pay{background:#f2b632;color:#10253c}
+  body{padding-bottom:78px}
+  .cart-pane.mobile-open{padding-bottom:78px}
+}
+
 </style>
 </head>
 <body>
@@ -429,6 +441,11 @@
   <strong id="mobileCartTotal">0,00 €</strong>
   <span class="mobile-cart-arrow">↑</span>
 </button>
+<nav class="mde-dock" aria-label="MDE Schnellbedienung">
+  <button class="mde-scan" type="button" onclick="openScanner()"><span>▥</span>SCANNEN</button>
+  <button type="button" onclick="toggleMobileCart(true)"><span>🛒</span><b id="mdeCartCount">0</b> ARTIKEL</button>
+  <button class="mde-pay" type="button" onclick="openMdePayment()"><span>€</span>BEZAHLEN</button>
+</nav>
 
 </div>
 <div class="toast-wrap" id="toasts"></div>
@@ -675,6 +692,18 @@ function restoreBuiltInImages(){
 }
 
 function seedExampleProducts(){
+  // Neue Firmen/Läden beginnen bewusst leer. Nur der eingebaute Star-Markt
+  // behält die Demoartikel zum sofortigen Spielen.
+  const demoCompany=!currentUser || currentUser.companyId==='company-star';
+  if(!demoCompany){
+    state.products=(state.products||[]).filter(p=>{
+      if(p.generated)return false;
+      return !baseProducts.some(b=>String(b.barcode)===String(p.barcode)&&b.name===p.name);
+    });
+    state.catalogVersion=CATALOG_VERSION;
+    if(!Array.isArray(state.coupons)||!state.coupons.length)state.coupons=seedCoupons.map(c=>({...c}));
+    return;
+  }
   // Die echten Beispielartikel zuerst übernehmen.
   if(!Array.isArray(state.products) || !state.products.length){
     state.products=baseProducts.map(p=>normalizeWeightedProduct({...p}));
@@ -1840,6 +1869,8 @@ function productCard(p){
   </article>`;
 }
 
+function emptyCatalogHtml(){return `<div class="category-empty" style="padding:28px 16px"><div style="font-size:36px;margin-bottom:8px">📱▥</div><h3 style="margin:0 0 7px">Neuer ${esc(state.storeType||'Laden')} · 0 Produkte</h3><p style="margin:0 0 16px">Scanne jetzt das erste Produkt. Bei einem unbekannten Barcode kannst du Name, Preis und Foto speichern.</p><div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap"><button class="btn green" onclick="openScanner()">⚡ Erstes Produkt scannen</button><button class="btn primary" onclick="openCreateProduct()">＋ Produkt manuell erstellen</button></div></div>`}
+
 function renderProducts(){
   const q=(document.getElementById('search')?.value||'').toLowerCase().trim();
   const available=state.products.filter(p=>productAllowed(p)&&(!q||`${p.name} ${p.barcode} ${p.cat}`.toLowerCase().includes(q)));
@@ -1848,10 +1879,11 @@ function renderProducts(){
   if(state.category!=='Alle'){
     const list=available.filter(p=>p.cat===state.category);
     document.getElementById('productCount').textContent=`${list.length} Artikel`;
+    if(!list.length){root.innerHTML=emptyCatalogHtml();return}
     root.innerHTML=`<section class="category-section">
       <div class="category-section-head"><h3>${esc(state.category)}</h3><span class="count">${list.length} Produkte</span><button class="btn" onclick="setCategory('Alle')">← Alle Kategorien</button></div>
       <div class="product-row">${list.map(productCard).join('')}</div>
-    </section>` || '<div class="category-empty">Keine Produkte gefunden.</div>';
+    </section>` || emptyCatalogHtml();
     setTimeout(initAutoProductImages,0);
     return;
   }
@@ -1870,7 +1902,7 @@ function renderProducts(){
       </div>
       <div class="product-row preview-row">${preview.map(productCard).join('')}</div>
     </section>`;
-  }).join('') || '<div class="category-empty">Keine Produkte gefunden.</div>';
+  }).join('') || emptyCatalogHtml();
 }
 function addProduct(id){
   const p=state.products.find(x=>x.id===id);if(!p)return;
@@ -1970,9 +2002,16 @@ function renderCart(){
   document.getElementById('subtotal').textContent=euro(calcSubtotal());document.getElementById('discount').textContent='− '+euro(couponAmount());document.getElementById('vat').textContent=euro(vat());document.getElementById('total').textContent=euro(total());document.getElementById('payCard').disabled=!state.cart.length;document.getElementById('payCash').disabled=!state.cart.length;
   const mobileCount=document.getElementById('mobileCartCount');
   const mobileTotal=document.getElementById('mobileCartTotal');
-  if(mobileCount)mobileCount.textContent=state.cart.reduce((s,x)=>s+(x.weighted?1:(Number(x.qty)||1)),0);
+  const mobileItems=state.cart.reduce((s,x)=>s+(x.weighted?1:(Number(x.qty)||1)),0);
+  if(mobileCount)mobileCount.textContent=mobileItems;
+  const mdeCount=document.getElementById('mdeCartCount');if(mdeCount)mdeCount.textContent=mobileItems;
   if(mobileTotal)mobileTotal.textContent=euro(total());
 
+}
+function openMdePayment(){
+  if(!state.cart.length)return toast('Zuerst ein Produkt scannen','bad');
+  toggleMobileCart(false);
+  modal('Bezahlen',`<div class="calc"><span>Gesamtbetrag</span><b>${euro(total())}</b></div><div class="helper" style="margin-top:10px">Zahlungsart am MDE-Gerät auswählen.</div>`,`<button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn" onclick="closeModal();openPayment('cash')">€ Bar</button><button class="btn green" onclick="closeModal();openPayment('card')">💳 Karte</button>`)
 }
 function applyInlineWeight(id){
   const x=state.cart.find(i=>i.lineId===id),el=document.getElementById(`inlineWeight_${id}`);if(!x||!el)return;
@@ -3262,6 +3301,9 @@ function applyRemoteCompanyData(data,{initial=false}={}){
       ensureProductBarcode(x);
       return x;
     });
+    if(currentUser?.companyId!=='company-star'){
+      state.products=state.products.filter(p=>!p.generated&&!baseProducts.some(b=>String(b.barcode)===String(p.barcode)&&b.name===p.name));
+    }
     restoreBuiltInImages();
   }
 
@@ -3305,7 +3347,7 @@ async function seedRemoteCompanyDefaults(snapshot){
   if(remoteSeedBusy)return;
   remoteSeedBusy=true;
   try{
-    if(!snapshot.products?.length){
+    if(!snapshot.products?.length && currentUser?.companyId==='company-star'){
       // Alle 750 Beispielprodukte einmal zentral für diese Firma speichern.
       const products=(state.products||[]).map(cleanRemoteProduct);
       await ksApi('seed_products',{products});
