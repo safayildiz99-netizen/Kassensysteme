@@ -350,7 +350,7 @@
     <div class="login-brand"><div class="logo"><i></i><i></i><i></i></div><div><b style="letter-spacing:.1em">KASSENSPIEL</b><small style="display:block;color:#728397">Supermarkt-Kassensimulator</small></div></div>
     <div style="color:#0d9667;font-size:10px;font-weight:900;letter-spacing:.18em">GESCHÜTZTER KASSENBEREICH</div>
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
-    <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
+    <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
     <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: LADENWECHSEL-SYNC-FIX-V5</div>
     <div class="register-actions">
@@ -3680,6 +3680,142 @@ window.openAccountsEntry=function(){
   else if(isCompanyAdmin())openAccountManager();
   else toast('Keine Berechtigung','bad');
 }
+</script>
+
+<style>
+/* ===== KASSENSPIEL MOBILE-SELLER V8 ===== */
+.stock-ok{color:#087c56;font-weight:900}.stock-low{color:#b26a00;font-weight:900}.stock-out{color:#bd3540;font-weight:900}
+.seller-result{display:grid;grid-template-columns:84px 1fr;gap:14px;align-items:center;margin-top:12px;padding:14px;border:1px solid #cfe6dc;border-radius:15px;background:#f2fbf7}
+.seller-result img{width:84px;height:84px;border-radius:12px;object-fit:cover;background:#e9eef2}.seller-result h3{margin:0 0 5px}.seller-price{font-size:24px;font-weight:950;color:#087c56}
+.store-card-actions{display:flex!important;gap:6px!important;margin-top:9px}.store-card-actions .btn{flex:1;padding:7px 5px}
+.inventory-row{display:grid;grid-template-columns:1fr 110px auto;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid #edf1f4}.inventory-row input{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 9px;width:100%}
+.perm-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.perm-grid label{border:1px solid var(--line);border-radius:10px;padding:10px;font-size:11px;font-weight:800}
+@media(max-width:600px){.seller-result{grid-template-columns:68px 1fr}.seller-result img{width:68px;height:68px}.inventory-row{grid-template-columns:1fr 80px}.inventory-row button{grid-column:1/-1}.perm-grid{grid-template-columns:1fr}}
+</style>
+<script>
+/* KASSENSPIEL MOBILE-SELLER V8 – additive Erweiterungen */
+const KS_V8='MOBILE-SELLER-V8';
+
+function storeProfile(type=state.storeType){
+  state.storeProfiles=state.storeProfiles||{};
+  const custom=(state.customStores||[]).find(s=>String(s.id)===String(type));
+  const key=String(type||'Alle');
+  return state.storeProfiles[key]||(state.storeProfiles[key]={name:custom?.name||state.store||activeCompany()?.name||'Star Markt',logo:custom?.logo||'',color:custom?.color||'#0ea76b'});
+}
+function activeStoreName(){return isCustomStoreType(state.storeType)?currentStoreLabel(state.storeType):(storeProfile().name||state.store||activeCompany()?.name||'Star Markt')}
+function activeStoreLogo(){return storeProfile().logo||state.logo||''}
+
+const _renderHeaderV7=renderHeader;
+renderHeader=function(){
+  _renderHeaderV7();
+  const name=activeStoreName(),type=currentStoreLabel(state.storeType||'Alle');
+  document.getElementById('storeSub').textContent=`${type} · ${name}`;
+};
+
+const _renderCustomStoreCardsV7=renderCustomStoreCards;
+renderCustomStoreCards=function(){
+  const root=document.getElementById('customStoreCards');if(!root)return;
+  root.innerHTML=(state.customStores||[]).map(s=>`<div class="store-option" style="border-top:5px solid ${escAttr(s.color||'#0ea873')}"><button style="all:unset;display:block;cursor:pointer" onclick="selectStore('${escAttr(s.id)}')"><div class="store-visual store-new" style="background:${escAttr(s.color||'#0ea873')}"><div>${esc(s.icon||'🏪')}</div></div><strong>${esc(s.name)}</strong><span>Eigener Laden · selbst befüllbar</span></button><div class="store-card-actions"><button class="btn" onclick="event.stopPropagation();editCustomStore('${escAttr(s.id)}')">✎ Bearbeiten</button><button class="btn danger" onclick="event.stopPropagation();deleteCustomStore('${escAttr(s.id)}')">Löschen</button></div></div>`).join('');
+};
+
+window.editCustomStore=function(id){
+  const s=(state.customStores||[]).find(x=>String(x.id)===String(id));if(!s)return;
+  modal('Eigenen Laden bearbeiten',`<div class="form-group"><label>Ladenname</label><input id="ecsName" value="${escAttr(s.name)}" maxlength="40"></div><div class="form-row"><div class="form-group"><label>Symbol</label><select id="ecsIcon">${['🏪','🌷','👕','💄','📱','🐶','🍔','📚','🎁','🛒'].map(x=>`<option ${x===s.icon?'selected':''}>${x}</option>`).join('')}</select></div><div class="form-group"><label>Farbe</label><input id="ecsColor" type="color" value="${escAttr(s.color||'#0ea873')}"></div></div>`,`<button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn green" onclick="saveCustomStore('${escAttr(id)}')">Speichern</button>`);
+};
+window.saveCustomStore=function(id){
+  const s=(state.customStores||[]).find(x=>String(x.id)===String(id));if(!s)return;
+  const name=document.getElementById('ecsName').value.trim();if(!name)return toast('Bitte Ladenname eingeben','bad');
+  s.name=name;s.icon=document.getElementById('ecsIcon').value;s.color=document.getElementById('ecsColor').value;
+  const p=storeProfile(id);p.name=name;p.color=s.color;save();scheduleRemoteCompanyStatePush();closeModal();refreshStoreChooserCounts();renderAll();toast('Laden gespeichert','good');
+};
+window.deleteCustomStore=function(id){
+  const s=(state.customStores||[]).find(x=>String(x.id)===String(id));if(!s||!confirm(`Laden „${s.name}“ und seine Produkte wirklich löschen?`))return;
+  const ids=(state.products||[]).filter(p=>String(p.customStoreId||'')===String(id)).map(p=>p.id);
+  ids.forEach(x=>remoteDeleteProduct(x));state.products=state.products.filter(p=>String(p.customStoreId||'')!==String(id));state.customStores=state.customStores.filter(x=>String(x.id)!==String(id));
+  if(state.storeProfiles)delete state.storeProfiles[id];if(String(state.storeType)===String(id))state.storeType='Alle';
+  save();scheduleRemoteCompanyStatePush();refreshStoreChooserCounts();renderAll();toast('Laden gelöscht','good');
+};
+
+const _createCustomStoreV7=window.createCustomStore;
+window.createCustomStore=function(){
+  const name=(document.getElementById('newStoreName')?.value||'').trim(),icon=document.getElementById('newStoreIcon')?.value||'🏪';
+  if(!name)return toast('Bitte einen Ladennamen eingeben','bad');
+  if((state.customStores||[]).some(s=>s.name.toLowerCase()===name.toLowerCase()))return toast('Diesen Laden gibt es bereits','bad');
+  const id=`custom-${Date.now()}`;state.customStores=[...(state.customStores||[]),{id,name,icon,color:'#0ea873'}];state.storeProfiles=state.storeProfiles||{};state.storeProfiles[id]={name,logo:'',color:'#0ea873'};state.storeType=id;state.category='Alle';save();scheduleRemoteCompanyStatePush();closeModal();closeStoreChooser();renderAll();toast(`${name} erstellt · jetzt ersten Artikel scannen`,'good');
+};
+
+window.openStore=function(){
+  const p=storeProfile();window.__draftStoreLogo=p.logo||'';
+  modal('Bon & aktueller Laden',`<div class="form-group"><label>Name dieses Ladens</label><input id="storeName" value="${escAttr(activeStoreName())}"></div><div class="form-group"><label>Logo nur für diesen Laden</label><div id="storeLogoPreview" style="height:90px;border:1px solid #dce5eb;border-radius:12px;display:grid;place-items:center;overflow:hidden;margin-bottom:8px">${p.logo?`<img src="${escAttr(p.logo)}" style="max-width:100%;max-height:100%;object-fit:contain;filter:grayscale(1)">`:'Kein Logo – Ladenname wird verwendet'}</div><label class="btn soft" style="cursor:pointer">Logo hochladen<input type="file" accept="image/*" hidden onchange="storeLogoSelected(this)"></label> <button class="btn danger" onclick="window.__draftStoreLogo='';document.getElementById('storeLogoPreview').textContent='Kein Logo – Ladenname wird verwendet'">Logo entfernen</button></div>`,`<button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn green" onclick="saveStoreV8()">Speichern</button>`);
+};
+window.saveStoreV8=function(){const p=storeProfile();p.name=document.getElementById('storeName').value.trim()||currentStoreLabel();p.logo=window.__draftStoreLogo||'';if(isCustomStoreType(state.storeType)){const s=state.customStores.find(x=>x.id===state.storeType);if(s)s.name=p.name}else state.store=p.name;save();scheduleRemoteCompanyStatePush();closeModal();renderHeader();toast('Ladenname und Bon-Logo gespeichert','good')};
+
+function stockNumber(p){return p.stock===null||p.stock===''||typeof p.stock==='undefined'?null:Math.max(0,Number(p.stock)||0)}
+function stockText(p){const n=stockNumber(p);if(n===null)return '<span class="stock-ok">Unbegrenzt verfügbar</span>';if(n<=0)return '<span class="stock-out">Nicht verfügbar</span>';if(n<=Number(p.lowStock||5))return `<span class="stock-low">Nur noch ${n}</span>`;return `<span class="stock-ok">${n} verfügbar</span>`}
+const _productCardV7=productCard;
+productCard=function(p){return _productCardV7(p).replace('<div class="prod-tap">',`<div class="prod-tap">Lager: ${stockText(p)}<br>`)};
+
+const _addProductV7=addProduct;
+addProduct=function(id){const p=state.products.find(x=>x.id===id);if(p&&stockNumber(p)!==null&&stockNumber(p)<=0)return toast('Artikel ist nicht verfügbar','bad');return _addProductV7(id)};
+const _addScannedRegularProductV7=addScannedRegularProduct;
+addScannedRegularProduct=function(p){if(stockNumber(p)!==null&&stockNumber(p)<=0){scanBeep('error');scannerStatus(`${p.name} ist nicht verfügbar`);return}return _addScannedRegularProductV7(p)};
+const _acceptScannedCodeV7=acceptScannedCode;
+acceptScannedCode=function(val){const p=state.products.find(x=>x.barcode===String(val).trim()&&productAllowed(x));const ok=_acceptScannedCodeV7(val);if(p&&scanMode!=='create'){const status=document.getElementById('scanStatus');if(status)status.innerHTML=`<b>✓ ${esc(p.name)}</b> · ${p.weighted?euro(weightedRate(p))+'/'+p.weightUnit:euro(p.price)} · Lager: ${stockText(p)}<br><small>${p.weighted?'Menge eingeben':'Im Warenkorb – nächstes Produkt scannen oder unten bezahlen'}</small>`}return ok};
+
+const _editProductV7=editProduct;
+editProduct=function(id){_editProductV7(id);const unit=document.getElementById('epUnit')?.closest('.form-group');if(unit)unit.insertAdjacentHTML('afterend',`<div class="form-row"><div class="form-group"><label>Lagerbestand (leer = unbegrenzt)</label><input id="epStock" inputmode="numeric" value="${escAttr(state.products.find(p=>p.id===id)?.stock??'')}"></div><div class="form-group"><label>Warnung ab Bestand</label><input id="epLowStock" inputmode="numeric" value="${escAttr(state.products.find(p=>p.id===id)?.lowStock??5)}"></div></div>`)};
+const _saveProductV7=saveProduct;
+saveProduct=function(id){const p=state.products.find(x=>x.id===id),s=document.getElementById('epStock')?.value.trim(),low=document.getElementById('epLowStock')?.value;_saveProductV7(id);if(p){p.stock=s===''?null:Math.max(0,Number(s)||0);p.lowStock=Math.max(0,Number(low)||5);save();remoteUpsertProduct(p);renderProducts()}};
+const _createProductV7=createProduct;
+createProduct=function(){_createProductV7();const newest=state.products[state.products.length-1];if(newest&&typeof newest.stock==='undefined'){newest.stock=null;newest.lowStock=5;save();remoteUpsertProduct(newest)}};
+
+window.openInventory=function(){if(!isOwner())return toast('Nur Admins dürfen das Lager ändern','bad');const list=state.products.filter(productAllowed);modal('Lagerbestand',`<div class="helper" style="margin-bottom:10px">Leer bedeutet unbegrenzt. Niedrige Bestände werden automatisch markiert.</div><div>${list.map(p=>`<div class="inventory-row"><div><b>${esc(p.name)}</b><br><small>${stockText(p)}</small></div><input id="stk_${p.id}" inputmode="numeric" value="${escAttr(p.stock??'')}" placeholder="∞"><button class="btn" onclick="saveOneStock(${p.id})">Speichern</button></div>`).join('')||'Keine Produkte'}</div>`,`<button class="btn" onclick="exportData()">Export</button><button class="btn" onclick="closeModal()">Schließen</button>`,true)};
+window.saveOneStock=function(id){const p=state.products.find(x=>x.id===id),v=document.getElementById(`stk_${id}`).value.trim();if(!p)return;p.stock=v===''?null:Math.max(0,Number(v)||0);save();remoteUpsertProduct(p);toast('Bestand gespeichert','good');openInventory()};
+
+const _finishPaymentV7=finishPayment;
+finishPayment=function(type){const sold=state.cart.map(x=>({...x})),storeName=activeStoreName(),storeLogo=activeStoreLogo();_finishPaymentV7(type);const latest=state.receipts?.[0];if(latest&&latest.type!=='refund'){latest.store=storeName;latest.storeLogo=storeLogo;remoteRecordReceipt(latest)}sold.forEach(line=>{const p=state.products.find(x=>x.id===line.productId),n=p&&stockNumber(p);if(p&&n!==null){p.stock=Math.max(0,n-(line.weighted?1:Number(line.qty)||1));remoteUpsertProduct(p,{silent:true})}});save();renderProducts()};
+
+const _receiptHtmlV7=receiptHtml;
+receiptHtml=function(r,print=false){const old=state.logo;state.logo=r?.storeLogo||'';const html=_receiptHtmlV7(r,print);state.logo=old;return html};
+
+window.refundReceiptItems=function(id){
+  const r=state.receipts.find(x=>x.id===id);if(!r||r.type==='refund')return;
+  modal(`Artikel zurückgeben · Bon ${r.id}`,`<div class="helper" style="margin-bottom:10px">Wähle nur die Artikel aus, die der Kunde zurückgibt.</div>${r.items.map((x,i)=>`<label class="receipt-row"><input type="checkbox" class="refundItem" value="${i}"><div><b>${esc(x.name)}</b><small>${x.weighted?formatMeasure(x.weight,x.weightUnit):(x.qty||1)+' Stück'}</small></div><strong>${euro(x.linePrice)}</strong></label>`).join('')}`,`<button class="btn" onclick="showReceipt('${id}')">Abbrechen</button><button class="btn danger" onclick="completePartialRefund('${id}')">Auswahl zurückgeben</button>`);
+};
+window.completePartialRefund=function(id){
+  const r=state.receipts.find(x=>x.id===id),idx=[...document.querySelectorAll('.refundItem:checked')].map(x=>Number(x.value));if(!r||!idx.length)return toast('Mindestens einen Artikel auswählen','bad');
+  const items=idx.map(i=>r.items[i]).filter(Boolean).map(x=>({...x,linePrice:-Math.abs(x.linePrice)}));const amount=items.reduce((s,x)=>s+Math.abs(Number(x.linePrice)||0),0);const rr={...r,id:uid(),date:new Date().toISOString(),type:'refund',originalId:r.id,items,subtotal:-amount,discount:0,coupon:null,total:-amount,vat:-(amount*19/119),note:`Teilrückgabe zu Bon ${r.id}`};rr.receiptCode=receiptBarcode(rr);state.receipts.unshift(rr);items.forEach(x=>{const p=state.products.find(p=>p.id===x.productId),n=p&&stockNumber(p);if(p&&n!==null){p.stock=n+(x.weighted?1:Number(x.qty)||1);remoteUpsertProduct(p,{silent:true})}});save();remoteRecordReceipt(rr);closeModal();renderAll();showReceipt(rr.id);toast('Teilrückgabe verbucht','good');
+};
+const _showReceiptV7=showReceipt;
+showReceipt=function(id){_showReceiptV7(id);const r=state.receipts.find(x=>x.id===id);if(r&&r.type!=='refund'){const foot=document.querySelector('#modalRoot .modal-foot');if(foot)foot.insertAdjacentHTML('beforeend',`<button class="btn danger" onclick="refundReceiptItems('${escAttr(id)}')">↩ Einzelne Artikel</button>`)}};
+
+window.toggleCouponV8=function(code){const c=state.coupons.find(x=>normalizeCouponCode(x.code)===normalizeCouponCode(code));if(!c)return;c.active=!c.active;save();remoteUpsertCoupon(c);openCoupons();toast(c.active?'Coupon aktiviert':'Coupon deaktiviert','good')};
+window.deleteCouponV8=function(code){const c=state.coupons.find(x=>normalizeCouponCode(x.code)===normalizeCouponCode(code));if(!c||!confirm('Coupon wirklich löschen?'))return;state.coupons=state.coupons.filter(x=>x!==c);save();if(typeof ksApi==='function')ksApi('delete_coupon',{code:c.code}).catch(()=>{});openCoupons();toast('Coupon gelöscht','good')};
+const _openCouponsV7=openCoupons;
+openCoupons=function(){_openCouponsV7();document.querySelectorAll('.coupon-card').forEach((el,i)=>{const c=state.coupons[i];if(c)el.insertAdjacentHTML('beforeend',`<div style="display:flex;gap:5px;margin-top:8px"><button class="btn" onclick="toggleCouponV8('${escAttr(c.code)}')">${c.active?'Deaktivieren':'Aktivieren'}</button><button class="btn danger" onclick="deleteCouponV8('${escAttr(c.code)}')">Löschen</button></div>`)})};
+
+window.exportData=function(){const data={version:KS_V8,exportedAt:new Date().toISOString(),store:activeStoreName(),customStores:state.customStores,storeProfiles:state.storeProfiles,products:state.products,coupons:state.coupons,receipts:state.receipts};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`kassenspiel-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('Sicherung heruntergeladen','good')};
+window.importDataV8=function(input){const file=input.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const d=JSON.parse(reader.result);if(!Array.isArray(d.products))throw new Error();if(!confirm('Sicherung einspielen? Produkte, Läden, Coupons und Bons werden ersetzt.'))return;state.products=d.products;state.customStores=Array.isArray(d.customStores)?d.customStores:[];state.storeProfiles=d.storeProfiles||{};state.coupons=Array.isArray(d.coupons)?d.coupons:[];state.receipts=Array.isArray(d.receipts)?d.receipts:[];save();state.products.forEach(p=>remoteUpsertProduct(p,{silent:true}));scheduleRemoteCompanyStatePush();renderAll();toast('Sicherung eingespielt','good')}catch(e){toast('Diese Sicherungsdatei ist ungültig','bad')}};reader.readAsText(file)};
+window.openCashClose=function(){const sales=todayReceipts().reduce((s,r)=>s+(Number(r.total)||0),0);modal('Kassenabschluss',`<div class="dashboard-grid"><div class="dash-kpi"><small>Umsatz heute</small><b>${euro(sales)}</b></div><div class="dash-kpi"><small>Vorgänge</small><b>${todayReceipts().length}</b></div></div><div class="form-group"><label>Gezähltes Bargeld in €</label><input id="cashActual" inputmode="decimal" oninput="cashClosePreview(${sales})" placeholder="0,00"></div><div class="calc"><span>Differenz zum Tagesumsatz</span><b id="cashDiff">–</b></div>`,`<button class="btn" onclick="closeModal()">Schließen</button><button class="btn green" onclick="print()">Bericht drucken</button>`)};
+window.cashClosePreview=function(expected){const n=parseFloat((document.getElementById('cashActual').value||'').replace(',','.'));document.getElementById('cashDiff').textContent=isFinite(n)?euro(n-expected):'–'};
+window.toggleFullscreenV8=async function(){try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen();else await document.exitFullscreen()}catch(e){toast('Vollbild wird auf diesem Gerät nicht unterstützt','bad')}};
+
+function installV8Buttons(){
+  if(document.getElementById('inventoryBtn'))return;
+  const actions=document.querySelector('.mini-actions');if(actions)actions.insertAdjacentHTML('beforeend','<button id="inventoryBtn" class="btn soft" onclick="openInventory()">📦 Lager</button><button class="btn" onclick="openCashClose()">▤ Abschluss</button><button class="btn" onclick="exportData()">↓ Export</button><label class="btn" style="cursor:pointer">↑ Import<input type="file" accept="application/json" hidden onchange="importDataV8(this)"></label><button class="btn" onclick="toggleFullscreenV8()">⛶ Vollbild</button>');
+  const build=document.querySelector('.login-card [style*="Build:"]');if(build)build.textContent='Build: '+KS_V8;
+}
+
+const _renderAllV7=renderAll;
+renderAll=function(){state.storeProfiles=state.storeProfiles||{};(state.products||[]).forEach(p=>{if(typeof p.lowStock==='undefined')p.lowStock=5});_renderAllV7();installV8Buttons()};
+
+/* Zusätzliche Firmendaten werden über denselben Online-Snapshot übertragen. */
+const _scheduleRemoteCompanyStatePushV7=scheduleRemoteCompanyStatePush;
+scheduleRemoteCompanyStatePush=function(){_scheduleRemoteCompanyStatePushV7();if(!remoteDataReady||!ksToken()||!currentUser)return;setTimeout(()=>ksApi('save_company_state',{companyState:{store:state.store,storeType:state.storeType,customStores:state.customStores||[],storeProfiles:state.storeProfiles||{}}}).catch(()=>{}),360)};
+const _applyRemoteCompanyDataV7=applyRemoteCompanyData;
+applyRemoteCompanyData=function(data,opts={}){_applyRemoteCompanyDataV7(data,opts);if(data?.companyState){if(Array.isArray(data.companyState.customStores))state.customStores=data.companyState.customStores;if(data.companyState.storeProfiles&&typeof data.companyState.storeProfiles==='object')state.storeProfiles=data.companyState.storeProfiles;save();if(!opts.initial)renderAll()}};
+
+installV8Buttons();renderAll();
 </script>
 
 </body></html>
