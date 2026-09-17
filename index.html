@@ -658,7 +658,9 @@ const seedCoupons=[
 ];
 let state={store:'Star Markt',storeType:'Alle',products:[],cart:[],receipts:[],sales:0,tx:0,coupons:[],activeCoupon:null,category:'Alle',activityLog:[]};
 
-const STATE_KEY_PREFIX='kassenspiel-online-state-products-v4';
+// Neue leere Kassenbestände dürfen nicht wieder aus dem alten Demo-Katalog
+// (4/16/6/4/4/4 Produkte) geladen werden.
+const STATE_KEY_PREFIX='kassenspiel-online-state-products-v5-empty';
 function stateStorageKey(){
   return `${STATE_KEY_PREFIX}-${currentUser?.companyId||'guest'}`;
 }
@@ -692,13 +694,29 @@ function restoreBuiltInImages(){
   });
 }
 
+function isLegacyDemoProduct(p){
+  if(!p)return false;
+  if(p.generated)return true;
+  const original=baseProducts.find(b=>String(b.id)===String(p.id));
+  if(!original)return false;
+  return String(p.name||'')===String(original.name||'') ||
+    String(p.barcode||'')===String(original.barcode||'');
+}
+
+function removeLegacyDemoProducts(){
+  const list=state.products||[];
+  const knownDemoCount=list.filter(isLegacyDemoProduct).length;
+  const smallIdCount=list.filter(p=>Number.isFinite(Number(p.id))&&Number(p.id)>0&&Number(p.id)<=100).length;
+  // Manche ältere Ausgaben enthielten zwei zusätzliche Spielwaren. Wenn ein
+  // kompletter alter 36/38er-Katalog erkannt wird, gehören auch diese dazu.
+  const completeOldCatalog=list.length>=30&&knownDemoCount>=12&&smallIdCount>=30;
+  state.products=list.filter(p=>!isLegacyDemoProduct(p)&&!(completeOldCatalog&&Number(p.id)>0&&Number(p.id)<=100));
+  state.catalogVersion=CATALOG_VERSION;
+}
+
 function seedExampleProducts(){
   // Jeder Geschäftstyp startet leer. Nur selbst erstellte/gescannte Artikel bleiben.
-  state.products=(state.products||[]).filter(p=>{
-    if(p.generated)return false;
-    return !baseProducts.some(b=>String(b.barcode)===String(p.barcode)&&b.name===p.name);
-  });
-  state.catalogVersion=CATALOG_VERSION;
+  removeLegacyDemoProducts();
   if(!Array.isArray(state.coupons) || !state.coupons.length){
     state.coupons=seedCoupons.map(c=>({...c}));
   }
@@ -3299,7 +3317,9 @@ function applyRemoteCompanyData(data,{initial=false}={}){
       ensureProductBarcode(x);
       return x;
     });
-    state.products=state.products.filter(p=>!p.generated&&!baseProducts.some(b=>String(b.barcode)===String(p.barcode)&&b.name===p.name));
+    // Auch ein alter Online-Snapshot mit den 38 Beispielartikeln wird sofort
+    // bereinigt, bevor die Zähler oder Produktkarten gerendert werden.
+    removeLegacyDemoProducts();
     restoreBuiltInImages();
   }
 
