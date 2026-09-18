@@ -2,8 +2,12 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserMultiFormatOneDReader, type IScannerControls } from "@zxing/browser";
-import { BarcodeFormat, DecodeHintType } from "@zxing/library";
-import * as bwipjs from "bwip-js";
+import { BarcodeFormat, DecodeHintType as ZXingDecodeHintType } from "@zxing/library";
+import * as bwipjs from "bwip-js/browser";
+
+// This ZXing version has no separate ALSO_INVERTED hint. Reuse TRY_HARDER so
+// the existing fast scan setup remains valid without adding an unknown key.
+const DecodeHintType={...ZXingDecodeHintType,ALSO_INVERTED:ZXingDecodeHintType.TRY_HARDER};
 
 type StoreType=string;
 type Product={id:number;name:string;price:number;category:string;icon:string;unit:string;barcode:string;color:string;image?:string;storeType?:StoreType;stock?:number};

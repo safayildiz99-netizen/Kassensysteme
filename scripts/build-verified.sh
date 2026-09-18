@@ -4,7 +4,9 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ "${SITES_ENV_READY:-}" != "1" ]]; then
-  exec "${script_dir}/sites-env.sh" -- "$0" "$@"
+  # GitHub's browser upload can remove executable file permissions. Calling
+  # both scripts through bash keeps Vercel builds working in that case.
+  exec bash "${script_dir}/sites-env.sh" -- bash "$0" "$@"
 fi
 
 command -v timeout || {
