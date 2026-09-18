@@ -1,0 +1,15 @@
+{
+  "name": "KassenSpiel MDE",
+  "short_name": "KassenSpiel",
+  "description": "Mobile Kasse mit automatischem Barcode-Scanner und Lagerbestand",
+  "lang": "de",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f6f8fb",
+  "theme_color": "#10253c",
+  "icons": [
+    {"src": "app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
+}

@@ -2,7 +2,9 @@
 <html lang="de">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#10253c" />
+<link rel="manifest" href="manifest.webmanifest" />
 <title>KassenSpiel – Vercel + Supabase</title>
 <style>
   :root{
@@ -350,7 +352,7 @@
     <div class="login-brand"><div class="logo"><i></i><i></i><i></i></div><div><b style="letter-spacing:.1em">KASSENSPIEL</b><small style="display:block;color:#728397">Supermarkt-Kassensimulator</small></div></div>
     <div style="color:#0d9667;font-size:10px;font-weight:900;letter-spacing:.18em">GESCHÜTZTER KASSENBEREICH</div>
     <h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p>
-    <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username"></div>
+    <div class="form-group"><label>Benutzername</label><input id="loginUser" value="admin" autocomplete="username" autocomplete="username"></div>
     <div class="form-group"><label>PIN</label><input id="loginPin" value="1234" type="password" inputmode="numeric" autocomplete="current-password"></div>
     <button class="btn green" onclick="login()">Anmelden</button><div id="backendStatus" class="tiny-note" style="margin-top:10px;text-align:center">● Online-Anmeldung über Vercel + Supabase</div><div style="margin-top:7px;text-align:center;font-size:11px;color:#8a98ab">Build: LADENWECHSEL-SYNC-FIX-V5</div>
     <div class="register-actions">
@@ -411,6 +413,9 @@
       <button class="btn" onclick="openReceipts()">▤ Käufe & Bons</button>
       <button id="couponAdminBtn" class="btn warn" onclick="openCoupons()">🎟 Angebote & Coupons</button>
       <button class="btn soft" onclick="openBarcodeForArticle()">▥ Barcode für Artikel</button>
+      <button class="btn soft" onclick="openInventory()">📦 Lager</button>
+      <button class="btn soft" onclick="openCashClose()">🧾 Kassenabschluss</button>
+      <button class="btn soft" onclick="openDataTools()">⇩ Daten</button>
       <button id="newProductTopBtn" class="btn primary" onclick="openCreateProduct()">＋ Neuer Artikel</button>
       <button class="btn" onclick="newDay()">↻ Neuer Kassentag</button>
     </div>
@@ -448,7 +453,7 @@
   <span class="mobile-cart-arrow">↑</span>
 </button>
 <nav class="mde-dock" aria-label="MDE Schnellbedienung">
-  <button class="mde-scan" type="button" onclick="openScanner()"><span>▥</span>SCANNEN</button>
+  <button class="mde-scan" type="button" onclick="openMdeScanner()"><span>▥</span>MDE-SCAN</button>
   <button type="button" onclick="toggleMobileCart(true)"><span>🛒</span><b id="mdeCartCount">0</b> ARTIKEL</button>
   <button class="mde-pay" type="button" onclick="openMdePayment()"><span>€</span>BEZAHLEN</button>
 </nav>
@@ -2361,6 +2366,10 @@ function openCreateProduct(prefillBarcode='',fromScan=false,draft=null){
       <div class="form-group"><label>Einkaufspreis €</label><input id="npCostPrice" inputmode="decimal" placeholder="0,99" value="${escAttr(d.costPrice||'')}"></div>
     </div>
     <div class="form-row">
+      <div class="form-group"><label>Lagerbestand</label><input id="npStock" inputmode="decimal" placeholder="z. B. 25" value="${escAttr(d.stock??25)}"></div>
+      <div class="form-group"><label>Bestandswarnung ab</label><input id="npLowStock" inputmode="decimal" placeholder="z. B. 5" value="${escAttr(d.lowStockAt??5)}"></div>
+    </div>
+    <div class="form-row">
       <div class="form-group">
         <label>Verkaufsart</label>
         <select id="npMeasureMode" onchange="updateCreateMeasureHelp()">
@@ -2422,6 +2431,8 @@ function collectProductDraft(){
     cat:document.getElementById('npCat')?.value||allowedCategories()[0],
     price:document.getElementById('npPrice')?.value||'',
     costPrice:document.getElementById('npCostPrice')?.value||'',
+    stock:document.getElementById('npStock')?.value||'25',
+    lowStockAt:document.getElementById('npLowStock')?.value||'5',
     unit:document.getElementById('npUnit')?.value||'Stück',
     measureMode:document.getElementById('npMeasureMode')?.value||'piece',
     barcode:document.getElementById('npBarcode')?.value||'',
@@ -2469,7 +2480,9 @@ function createProduct(){
     unit:document.getElementById('npUnit').value||'Stück',
     measureMode:document.getElementById('npMeasureMode')?.value||'piece',
     barcode,emoji:document.getElementById('npEmoji').value||'📦',image:window.__draftProductImage||'',
-    customStoreId:isCustomStoreType(state.storeType)?state.storeType:undefined
+    customStoreId:isCustomStoreType(state.storeType)?state.storeType:undefined,
+    stock:Math.max(0,parseFloat((document.getElementById('npStock')?.value||'25').replace(',','.'))||0),
+    lowStockAt:Math.max(0,parseFloat((document.getElementById('npLowStock')?.value||'5').replace(',','.'))||0)
   };
   if(p.measureMode==='mass'){p.unit='kg';p.measurePricingVersion=2}
   if(p.measureMode==='volume'){p.unit='L';p.measurePricingVersion=2}
@@ -2486,6 +2499,10 @@ function editProduct(id){if(!isOwner())return toast('Nur Firmen-Admin oder Groß
     <div class="form-row">
       <div class="form-group"><label>Verkaufspreis €</label><input id="epPrice" value="${String(p.price).replace('.',',')}"></div>
       <div class="form-group"><label>Einkaufspreis €</label><input id="epCostPrice" value="${String(p.costPrice??(p.price*.7)).replace('.',',')}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Lagerbestand</label><input id="epStock" inputmode="decimal" value="${String(p.stock??25).replace('.',',')}"></div>
+      <div class="form-group"><label>Bestandswarnung ab</label><input id="epLowStock" inputmode="decimal" value="${String(p.lowStockAt??5).replace('.',',')}"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>Barcode</label><input id="epBarcode" value="${escAttr(p.barcode)}"></div>
@@ -2511,6 +2528,8 @@ function saveProduct(id){
   const cp=parseFloat((document.getElementById('epCostPrice').value||'').replace(',','.'));
   if(!isFinite(pr)||pr<0||!isFinite(cp)||cp<0)return toast('Ungültiger Verkaufs- oder Einkaufspreis','bad');
   p.name=document.getElementById('epName').value.trim()||p.name;p.price=pr;p.costPrice=cp;
+  p.stock=Math.max(0,parseFloat((document.getElementById('epStock')?.value||'0').replace(',','.'))||0);
+  p.lowStockAt=Math.max(0,parseFloat((document.getElementById('epLowStock')?.value||'0').replace(',','.'))||0);
   p.image=window.__editProductImage||p.image||'';
   p.barcode=document.getElementById('epBarcode').value.trim()||p.barcode;
   p.measureMode=document.getElementById('epMeasureMode')?.value||'piece';
@@ -2818,13 +2837,14 @@ async function startZXingScanner(video){
 
 async function startScanner(){
   try{
-    // Weniger Pixel pro Frame beschleunigen die Erkennung auf Handys.
+    // 1280x720 is intentionally preferred over 1920x1080:
+    // barcode decoding is noticeably quicker and still sharp enough.
     scanStream=await navigator.mediaDevices.getUserMedia({
       video:{
         facingMode:{ideal:'environment'},
-        width:{ideal:960,max:1280},
-        height:{ideal:540,max:720},
-        frameRate:{ideal:60,min:24}
+        width:{ideal:1280,max:1920},
+        height:{ideal:720,max:1080},
+        frameRate:{ideal:60,min:30}
       },
       audio:false
     });
@@ -2850,7 +2870,7 @@ async function startScanner(){
           advanced.push({exposureMode:'continuous'});
         }
         if(caps.zoom && Number.isFinite(caps.zoom.min) && Number.isFinite(caps.zoom.max) && caps.zoom.max>caps.zoom.min){
-          const zoom=Math.min(caps.zoom.max,Math.max(caps.zoom.min,caps.zoom.min+(caps.zoom.max-caps.zoom.min)*0.18));
+          const zoom=Math.min(caps.zoom.max,Math.max(caps.zoom.min,caps.zoom.min+(caps.zoom.max-caps.zoom.min)*0.12));
           advanced.push({zoom});
         }
         if(advanced.length)await scanTrack.applyConstraints({advanced});
@@ -2877,11 +2897,8 @@ async function startScanner(){
     scanCropCtx=scanCropCanvas.getContext('2d',{alpha:false,willReadFrequently:false});
 
     if(scanDetector){
-      scannerStatus('⚡ DOPPEL-SCAN aktiv – Barcode wird gleichzeitig auf zwei Wegen gelesen …');
+      scannerStatus('⚡ SUPER-BLITZSCAN aktiv – jeder Kameraframe wird sofort geprüft …');
       startNativeFrameScanner(v);
-      // Manche Android-/iPhone-Kameras melden BarcodeDetector, erkennen damit
-      // aber sehr langsam. ZXing liest deshalb parallel denselben Videostream.
-      startZXingScanner(v).catch(()=>{});
     }else{
       scannerStatus('⚡ SUPER-BLITZSCAN startet …');
       await startZXingScanner(v);
@@ -2953,17 +2970,17 @@ async function detectFastFrame(){
   try{
     let target=v;
 
-    // Meist nur den grünen Barcode-Bereich prüfen; jeder fünfte Frame
-    // bleibt eine Vollbild-Suche. Pro Frame gibt es nur einen Detector-Aufruf.
-    if(scanTick%5!==0 && scanCropCanvas && scanCropCtx){
+    // Alternate full frame / central barcode strip.
+    // Only ONE detector call per camera frame keeps latency very low.
+    if(scanTick%2===0 && scanCropCanvas && scanCropCtx){
       const vw=v.videoWidth,vh=v.videoHeight;
       const sx=Math.floor(vw*.04);
       const sy=Math.floor(vh*.23);
       const sw=Math.floor(vw*.92);
       const sh=Math.floor(vh*.54);
 
-      const targetW=Math.min(640,sw);
-      const targetH=Math.max(190,Math.round(targetW*(sh/sw)));
+      const targetW=Math.min(820,sw);
+      const targetH=Math.max(240,Math.round(targetW*(sh/sw)));
       if(scanCropCanvas.width!==targetW||scanCropCanvas.height!==targetH){
         scanCropCanvas.width=targetW;
         scanCropCanvas.height=targetH;
@@ -3685,141 +3702,143 @@ window.openAccountsEntry=function(){
 </script>
 
 <style>
-/* ===== KASSENSPIEL MOBILE-SELLER V8 ===== */
-.stock-ok{color:#087c56;font-weight:900}.stock-low{color:#b26a00;font-weight:900}.stock-out{color:#bd3540;font-weight:900}
-.seller-result{display:grid;grid-template-columns:84px 1fr;gap:14px;align-items:center;margin-top:12px;padding:14px;border:1px solid #cfe6dc;border-radius:15px;background:#f2fbf7}
-.seller-result img{width:84px;height:84px;border-radius:12px;object-fit:cover;background:#e9eef2}.seller-result h3{margin:0 0 5px}.seller-price{font-size:24px;font-weight:950;color:#087c56}
-.store-card-actions{display:flex!important;gap:6px!important;margin-top:9px}.store-card-actions .btn{flex:1;padding:7px 5px}
-.inventory-row{display:grid;grid-template-columns:1fr 110px auto;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid #edf1f4}.inventory-row input{height:38px;border:1px solid var(--line);border-radius:9px;padding:0 9px;width:100%}
-.perm-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.perm-grid label{border:1px solid var(--line);border-radius:10px;padding:10px;font-size:11px;font-weight:800}
-@media(max-width:600px){.seller-result{grid-template-columns:68px 1fr}.seller-result img{width:68px;height:68px}.inventory-row{grid-template-columns:1fr 80px}.inventory-row button{grid-column:1/-1}.perm-grid{grid-template-columns:1fr}}
+  .stock-pill{display:inline-flex;align-items:center;gap:5px;margin-top:6px;padding:4px 7px;border-radius:999px;background:#e7f7ef;color:#087b57;font-size:10px;font-weight:900}
+  #customStoreCards{display:contents}
+  .stock-pill.low{background:#fff0d8;color:#a66100}.stock-pill.out{background:#ffe8ea;color:#b22f3b}
+  .mde-product{display:grid;grid-template-columns:150px 1fr;gap:18px;align-items:start}.mde-product img{width:150px;height:150px;border-radius:18px;object-fit:contain;background:#f2f5f7;border:1px solid #dce4ec}.mde-price{font-size:30px;font-weight:950;color:#087c56}.mde-facts{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-top:14px}.mde-fact{padding:11px;border:1px solid #dce4ec;border-radius:12px;background:#f8fafc}.mde-fact small{display:block;color:#728397;margin-bottom:4px}.mde-fact b{font-size:15px}.inventory-row{display:grid;grid-template-columns:minmax(0,1fr) 100px 120px;gap:8px;align-items:center;padding:10px;border-bottom:1px solid #e7edf2}.inventory-row input{height:40px;border:1px solid #dce4ec;border-radius:9px;padding:0 9px;width:100%}.custom-store-wrap{position:relative}.custom-store-actions{display:flex;gap:6px;margin-top:9px}.custom-store-actions .btn{flex:1}.refund-line{display:grid;grid-template-columns:auto 1fr 90px;gap:9px;align-items:center;padding:10px 0;border-bottom:1px solid #e7edf2}.refund-line input[type=number]{width:86px;height:40px;border:1px solid #dce4ec;border-radius:8px;padding:0 8px}.coupon-actions{display:flex;gap:5px;margin-top:8px;flex-wrap:wrap}
+  @media(max-width:600px){.mde-product{grid-template-columns:92px 1fr}.mde-product img{width:92px;height:92px}.mde-price{font-size:24px}.mde-facts{grid-template-columns:1fr 1fr}.inventory-row{grid-template-columns:1fr 82px}.inventory-row .btn{grid-column:1/-1}.modal-foot{flex-wrap:wrap}.modal-foot .btn{min-height:44px}}
 </style>
+
 <script>
-/* KASSENSPIEL MOBILE-SELLER V8 – additive Erweiterungen */
-const KS_V8='MOBILE-SELLER-V10-DOPPELSCAN';
-
-function storeProfile(type=state.storeType){
-  state.storeProfiles=state.storeProfiles||{};
-  const custom=(state.customStores||[]).find(s=>String(s.id)===String(type));
-  const key=String(type||'Alle');
-  return state.storeProfiles[key]||(state.storeProfiles[key]={name:custom?.name||state.store||activeCompany()?.name||'Star Markt',logo:custom?.logo||'',color:custom?.color||'#0ea76b'});
+/* ===== MDE-, Lager- und Verwaltungs-Erweiterung ===== */
+function ensureExtendedState(){
+  state.customStores=Array.isArray(state.customStores)?state.customStores:[];
+  state.storeProfiles=state.storeProfiles&&typeof state.storeProfiles==='object'?state.storeProfiles:{};
+  state.cashClosings=Array.isArray(state.cashClosings)?state.cashClosings:[];
+  (state.products||[]).forEach((p,i)=>{
+    if(!Number.isFinite(Number(p.stock)))p.stock=20+(stableHash(String(p.barcode||p.id))%31);
+    if(!Number.isFinite(Number(p.lowStockAt)))p.lowStockAt=5;
+  });
 }
-function activeStoreName(){return isCustomStoreType(state.storeType)?currentStoreLabel(state.storeType):(storeProfile().name||state.store||activeCompany()?.name||'Star Markt')}
-function activeStoreLogo(){return storeProfile().logo||state.logo||''}
+ensureExtendedState();
 
-const _renderHeaderV7=renderHeader;
-renderHeader=function(){
-  _renderHeaderV7();
-  const name=activeStoreName(),type=currentStoreLabel(state.storeType||'Alle');
-  document.getElementById('storeSub').textContent=`${type} · ${name}`;
+const __extendedLoad=load;
+load=function(){const out=__extendedLoad.apply(this,arguments);ensureExtendedState();return out};
+
+const __extendedRenderAll=renderAll;
+renderAll=function(){ensureExtendedState();return __extendedRenderAll.apply(this,arguments)};
+
+const __extendedProductCard=productCard;
+productCard=function(p){
+  const stock=Math.max(0,Number(p.stock)||0),low=stock<=Number(p.lowStockAt||5);
+  const chip=`<div class="stock-pill ${stock<=0?'out':low?'low':''}">${stock<=0?'Nicht verfügbar':low?`Nur ${num(stock)} verfügbar`:`${num(stock)} auf Lager`}</div>`;
+  const html=__extendedProductCard(p);
+  return html.replace('<div class="prod-bottom">',chip+'<div class="prod-bottom">');
 };
 
-const _renderCustomStoreCardsV7=renderCustomStoreCards;
-renderCustomStoreCards=function(){
-  const root=document.getElementById('customStoreCards');if(!root)return;
-  root.innerHTML=(state.customStores||[]).map(s=>`<div class="store-option" style="border-top:5px solid ${escAttr(s.color||'#0ea873')}"><button style="all:unset;display:block;cursor:pointer" onclick="selectStore('${escAttr(s.id)}')"><div class="store-visual store-new" style="background:${escAttr(s.color||'#0ea873')}"><div>${esc(s.icon||'🏪')}</div></div><strong>${esc(s.name)}</strong><span>Eigener Laden · selbst befüllbar</span></button><div class="store-card-actions"><button class="btn" onclick="event.stopPropagation();editCustomStore('${escAttr(s.id)}')">✎ Bearbeiten</button><button class="btn danger" onclick="event.stopPropagation();deleteCustomStore('${escAttr(s.id)}')">Löschen</button></div></div>`).join('');
-};
-
-window.editCustomStore=function(id){
-  const s=(state.customStores||[]).find(x=>String(x.id)===String(id));if(!s)return;
-  modal('Eigenen Laden bearbeiten',`<div class="form-group"><label>Ladenname</label><input id="ecsName" value="${escAttr(s.name)}" maxlength="40"></div><div class="form-row"><div class="form-group"><label>Symbol</label><select id="ecsIcon">${['🏪','🌷','👕','💄','📱','🐶','🍔','📚','🎁','🛒'].map(x=>`<option ${x===s.icon?'selected':''}>${x}</option>`).join('')}</select></div><div class="form-group"><label>Farbe</label><input id="ecsColor" type="color" value="${escAttr(s.color||'#0ea873')}"></div></div>`,`<button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn green" onclick="saveCustomStore('${escAttr(id)}')">Speichern</button>`);
-};
-window.saveCustomStore=function(id){
-  const s=(state.customStores||[]).find(x=>String(x.id)===String(id));if(!s)return;
-  const name=document.getElementById('ecsName').value.trim();if(!name)return toast('Bitte Ladenname eingeben','bad');
-  s.name=name;s.icon=document.getElementById('ecsIcon').value;s.color=document.getElementById('ecsColor').value;
-  const p=storeProfile(id);p.name=name;p.color=s.color;save();scheduleRemoteCompanyStatePush();closeModal();refreshStoreChooserCounts();renderAll();toast('Laden gespeichert','good');
-};
-window.deleteCustomStore=function(id){
-  const s=(state.customStores||[]).find(x=>String(x.id)===String(id));if(!s||!confirm(`Laden „${s.name}“ und seine Produkte wirklich löschen?`))return;
-  const ids=(state.products||[]).filter(p=>String(p.customStoreId||'')===String(id)).map(p=>p.id);
-  ids.forEach(x=>remoteDeleteProduct(x));state.products=state.products.filter(p=>String(p.customStoreId||'')!==String(id));state.customStores=state.customStores.filter(x=>String(x.id)!==String(id));
-  if(state.storeProfiles)delete state.storeProfiles[id];if(String(state.storeType)===String(id))state.storeType='Alle';
-  save();scheduleRemoteCompanyStatePush();refreshStoreChooserCounts();renderAll();toast('Laden gelöscht','good');
-};
-
-const _createCustomStoreV7=window.createCustomStore;
-window.createCustomStore=function(){
-  const name=(document.getElementById('newStoreName')?.value||'').trim(),icon=document.getElementById('newStoreIcon')?.value||'🏪';
-  if(!name)return toast('Bitte einen Ladennamen eingeben','bad');
-  if((state.customStores||[]).some(s=>s.name.toLowerCase()===name.toLowerCase()))return toast('Diesen Laden gibt es bereits','bad');
-  const id=`custom-${Date.now()}`;state.customStores=[...(state.customStores||[]),{id,name,icon,color:'#0ea873'}];state.storeProfiles=state.storeProfiles||{};state.storeProfiles[id]={name,logo:'',color:'#0ea873'};state.storeType=id;state.category='Alle';save();scheduleRemoteCompanyStatePush();closeModal();closeStoreChooser();renderAll();toast(`${name} erstellt · jetzt ersten Artikel scannen`,'good');
-};
-
-window.openStore=function(){
-  const p=storeProfile();window.__draftStoreLogo=p.logo||'';
-  modal('Bon & aktueller Laden',`<div class="form-group"><label>Name dieses Ladens</label><input id="storeName" value="${escAttr(activeStoreName())}"></div><div class="form-group"><label>Logo nur für diesen Laden</label><div id="storeLogoPreview" style="height:90px;border:1px solid #dce5eb;border-radius:12px;display:grid;place-items:center;overflow:hidden;margin-bottom:8px">${p.logo?`<img src="${escAttr(p.logo)}" style="max-width:100%;max-height:100%;object-fit:contain;filter:grayscale(1)">`:'Kein Logo – Ladenname wird verwendet'}</div><label class="btn soft" style="cursor:pointer">Logo hochladen<input type="file" accept="image/*" hidden onchange="storeLogoSelected(this)"></label> <button class="btn danger" onclick="window.__draftStoreLogo='';document.getElementById('storeLogoPreview').textContent='Kein Logo – Ladenname wird verwendet'">Logo entfernen</button></div>`,`<button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn green" onclick="saveStoreV8()">Speichern</button>`);
-};
-window.saveStoreV8=function(){const p=storeProfile();p.name=document.getElementById('storeName').value.trim()||currentStoreLabel();p.logo=window.__draftStoreLogo||'';if(isCustomStoreType(state.storeType)){const s=state.customStores.find(x=>x.id===state.storeType);if(s)s.name=p.name}else state.store=p.name;save();scheduleRemoteCompanyStatePush();closeModal();renderHeader();toast('Ladenname und Bon-Logo gespeichert','good')};
-
-function stockNumber(p){return p.stock===null||p.stock===''||typeof p.stock==='undefined'?null:Math.max(0,Number(p.stock)||0)}
-function stockText(p){const n=stockNumber(p);if(n===null)return '<span class="stock-ok">Unbegrenzt verfügbar</span>';if(n<=0)return '<span class="stock-out">Nicht verfügbar</span>';if(n<=Number(p.lowStock||5))return `<span class="stock-low">Nur noch ${n}</span>`;return `<span class="stock-ok">${n} verfügbar</span>`}
-const _productCardV7=productCard;
-productCard=function(p){return _productCardV7(p).replace('<div class="prod-tap">',`<div class="prod-tap">Lager: ${stockText(p)}<br>`)};
-
-const _addProductV7=addProduct;
-addProduct=function(id){const p=state.products.find(x=>x.id===id);if(p&&stockNumber(p)!==null&&stockNumber(p)<=0)return toast('Artikel ist nicht verfügbar','bad');return _addProductV7(id)};
-const _addScannedRegularProductV7=addScannedRegularProduct;
-addScannedRegularProduct=function(p){if(stockNumber(p)!==null&&stockNumber(p)<=0){scanBeep('error');scannerStatus(`${p.name} ist nicht verfügbar`);return}return _addScannedRegularProductV7(p)};
-const _acceptScannedCodeV7=acceptScannedCode;
-acceptScannedCode=function(val){const p=state.products.find(x=>x.barcode===String(val).trim()&&productAllowed(x));const ok=_acceptScannedCodeV7(val);if(p&&scanMode!=='create'){const status=document.getElementById('scanStatus');if(status)status.innerHTML=`<b>✓ ${esc(p.name)}</b> · ${p.weighted?euro(weightedRate(p))+'/'+p.weightUnit:euro(p.price)} · Lager: ${stockText(p)}<br><small>${p.weighted?'Menge eingeben':'Im Warenkorb – nächstes Produkt scannen oder unten bezahlen'}</small>`}return ok};
-
-const _editProductV7=editProduct;
-editProduct=function(id){_editProductV7(id);const unit=document.getElementById('epUnit')?.closest('.form-group');if(unit)unit.insertAdjacentHTML('afterend',`<div class="form-row"><div class="form-group"><label>Lagerbestand (leer = unbegrenzt)</label><input id="epStock" inputmode="numeric" value="${escAttr(state.products.find(p=>p.id===id)?.stock??'')}"></div><div class="form-group"><label>Warnung ab Bestand</label><input id="epLowStock" inputmode="numeric" value="${escAttr(state.products.find(p=>p.id===id)?.lowStock??5)}"></div></div>`)};
-const _saveProductV7=saveProduct;
-saveProduct=function(id){const p=state.products.find(x=>x.id===id),s=document.getElementById('epStock')?.value.trim(),low=document.getElementById('epLowStock')?.value;_saveProductV7(id);if(p){p.stock=s===''?null:Math.max(0,Number(s)||0);p.lowStock=Math.max(0,Number(low)||5);save();remoteUpsertProduct(p);renderProducts()}};
-const _createProductV7=createProduct;
-createProduct=function(){_createProductV7();const newest=state.products[state.products.length-1];if(newest&&typeof newest.stock==='undefined'){newest.stock=null;newest.lowStock=5;save();remoteUpsertProduct(newest)}};
-
-window.openInventory=function(){if(!isOwner())return toast('Nur Admins dürfen das Lager ändern','bad');const list=state.products.filter(productAllowed);modal('Lagerbestand',`<div class="helper" style="margin-bottom:10px">Leer bedeutet unbegrenzt. Niedrige Bestände werden automatisch markiert.</div><div>${list.map(p=>`<div class="inventory-row"><div><b>${esc(p.name)}</b><br><small>${stockText(p)}</small></div><input id="stk_${p.id}" inputmode="numeric" value="${escAttr(p.stock??'')}" placeholder="∞"><button class="btn" onclick="saveOneStock(${p.id})">Speichern</button></div>`).join('')||'Keine Produkte'}</div>`,`<button class="btn" onclick="exportData()">Export</button><button class="btn" onclick="closeModal()">Schließen</button>`,true)};
-window.saveOneStock=function(id){const p=state.products.find(x=>x.id===id),v=document.getElementById(`stk_${id}`).value.trim();if(!p)return;p.stock=v===''?null:Math.max(0,Number(v)||0);save();remoteUpsertProduct(p);toast('Bestand gespeichert','good');openInventory()};
-
-const _finishPaymentV7=finishPayment;
-finishPayment=function(type){const sold=state.cart.map(x=>({...x})),storeName=activeStoreName(),storeLogo=activeStoreLogo();_finishPaymentV7(type);const latest=state.receipts?.[0];if(latest&&latest.type!=='refund'){latest.store=storeName;latest.storeLogo=storeLogo;remoteRecordReceipt(latest)}sold.forEach(line=>{const p=state.products.find(x=>x.id===line.productId),n=p&&stockNumber(p);if(p&&n!==null){p.stock=Math.max(0,n-(line.weighted?1:Number(line.qty)||1));remoteUpsertProduct(p,{silent:true})}});save();renderProducts()};
-
-const _receiptHtmlV7=receiptHtml;
-receiptHtml=function(r,print=false){const old=state.logo;state.logo=r?.storeLogo||'';const html=_receiptHtmlV7(r,print);state.logo=old;return html};
-
-window.refundReceiptItems=function(id){
-  const r=state.receipts.find(x=>x.id===id);if(!r||r.type==='refund')return;
-  modal(`Artikel zurückgeben · Bon ${r.id}`,`<div class="helper" style="margin-bottom:10px">Wähle nur die Artikel aus, die der Kunde zurückgibt.</div>${r.items.map((x,i)=>`<label class="receipt-row"><input type="checkbox" class="refundItem" value="${i}"><div><b>${esc(x.name)}</b><small>${x.weighted?formatMeasure(x.weight,x.weightUnit):(x.qty||1)+' Stück'}</small></div><strong>${euro(x.linePrice)}</strong></label>`).join('')}`,`<button class="btn" onclick="showReceipt('${id}')">Abbrechen</button><button class="btn danger" onclick="completePartialRefund('${id}')">Auswahl zurückgeben</button>`);
-};
-window.completePartialRefund=function(id){
-  const r=state.receipts.find(x=>x.id===id),idx=[...document.querySelectorAll('.refundItem:checked')].map(x=>Number(x.value));if(!r||!idx.length)return toast('Mindestens einen Artikel auswählen','bad');
-  const items=idx.map(i=>r.items[i]).filter(Boolean).map(x=>({...x,linePrice:-Math.abs(x.linePrice)}));const amount=items.reduce((s,x)=>s+Math.abs(Number(x.linePrice)||0),0);const rr={...r,id:uid(),date:new Date().toISOString(),type:'refund',originalId:r.id,items,subtotal:-amount,discount:0,coupon:null,total:-amount,vat:-(amount*19/119),note:`Teilrückgabe zu Bon ${r.id}`};rr.receiptCode=receiptBarcode(rr);state.receipts.unshift(rr);items.forEach(x=>{const p=state.products.find(p=>p.id===x.productId),n=p&&stockNumber(p);if(p&&n!==null){p.stock=n+(x.weighted?1:Number(x.qty)||1);remoteUpsertProduct(p,{silent:true})}});save();remoteRecordReceipt(rr);closeModal();renderAll();showReceipt(rr.id);toast('Teilrückgabe verbucht','good');
-};
-const _showReceiptV7=showReceipt;
-showReceipt=function(id){_showReceiptV7(id);const r=state.receipts.find(x=>x.id===id);if(r&&r.type!=='refund'){const foot=document.querySelector('#modalRoot .modal-foot');if(foot)foot.insertAdjacentHTML('beforeend',`<button class="btn danger" onclick="refundReceiptItems('${escAttr(id)}')">↩ Einzelne Artikel</button>`)}};
-
-window.toggleCouponV8=function(code){const c=state.coupons.find(x=>normalizeCouponCode(x.code)===normalizeCouponCode(code));if(!c)return;c.active=!c.active;save();remoteUpsertCoupon(c);openCoupons();toast(c.active?'Coupon aktiviert':'Coupon deaktiviert','good')};
-window.deleteCouponV8=function(code){const c=state.coupons.find(x=>normalizeCouponCode(x.code)===normalizeCouponCode(code));if(!c||!confirm('Coupon wirklich löschen?'))return;state.coupons=state.coupons.filter(x=>x!==c);save();if(typeof ksApi==='function')ksApi('delete_coupon',{code:c.code}).catch(()=>{});openCoupons();toast('Coupon gelöscht','good')};
-const _openCouponsV7=openCoupons;
-openCoupons=function(){_openCouponsV7();document.querySelectorAll('.coupon-card').forEach((el,i)=>{const c=state.coupons[i];if(c)el.insertAdjacentHTML('beforeend',`<div style="display:flex;gap:5px;margin-top:8px"><button class="btn" onclick="toggleCouponV8('${escAttr(c.code)}')">${c.active?'Deaktivieren':'Aktivieren'}</button><button class="btn danger" onclick="deleteCouponV8('${escAttr(c.code)}')">Löschen</button></div>`)})};
-
-window.exportData=function(){const data={version:KS_V8,exportedAt:new Date().toISOString(),store:activeStoreName(),customStores:state.customStores,storeProfiles:state.storeProfiles,products:state.products,coupons:state.coupons,receipts:state.receipts};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`kassenspiel-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);toast('Sicherung heruntergeladen','good')};
-window.importDataV8=function(input){const file=input.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const d=JSON.parse(reader.result);if(!Array.isArray(d.products))throw new Error();if(!confirm('Sicherung einspielen? Produkte, Läden, Coupons und Bons werden ersetzt.'))return;state.products=d.products;state.customStores=Array.isArray(d.customStores)?d.customStores:[];state.storeProfiles=d.storeProfiles||{};state.coupons=Array.isArray(d.coupons)?d.coupons:[];state.receipts=Array.isArray(d.receipts)?d.receipts:[];save();state.products.forEach(p=>remoteUpsertProduct(p,{silent:true}));scheduleRemoteCompanyStatePush();renderAll();toast('Sicherung eingespielt','good')}catch(e){toast('Diese Sicherungsdatei ist ungültig','bad')}};reader.readAsText(file)};
-window.openCashClose=function(){const sales=todayReceipts().reduce((s,r)=>s+(Number(r.total)||0),0);modal('Kassenabschluss',`<div class="dashboard-grid"><div class="dash-kpi"><small>Umsatz heute</small><b>${euro(sales)}</b></div><div class="dash-kpi"><small>Vorgänge</small><b>${todayReceipts().length}</b></div></div><div class="form-group"><label>Gezähltes Bargeld in €</label><input id="cashActual" inputmode="decimal" oninput="cashClosePreview(${sales})" placeholder="0,00"></div><div class="calc"><span>Differenz zum Tagesumsatz</span><b id="cashDiff">–</b></div>`,`<button class="btn" onclick="closeModal()">Schließen</button><button class="btn green" onclick="print()">Bericht drucken</button>`)};
-window.cashClosePreview=function(expected){const n=parseFloat((document.getElementById('cashActual').value||'').replace(',','.'));document.getElementById('cashDiff').textContent=isFinite(n)?euro(n-expected):'–'};
-window.toggleFullscreenV8=async function(){try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen();else await document.exitFullscreen()}catch(e){toast('Vollbild wird auf diesem Gerät nicht unterstützt','bad')}};
-
-function installV8Buttons(){
-  if(document.getElementById('inventoryBtn'))return;
-  const actions=document.querySelector('.mini-actions');if(actions)actions.insertAdjacentHTML('beforeend','<button id="inventoryBtn" class="btn soft" onclick="openInventory()">📦 Lager</button><button class="btn" onclick="openCashClose()">▤ Abschluss</button><button class="btn" onclick="exportData()">↓ Export</button><label class="btn" style="cursor:pointer">↑ Import<input type="file" accept="application/json" hidden onchange="importDataV8(this)"></label><button class="btn" onclick="toggleFullscreenV8()">⛶ Vollbild</button>');
-  const build=document.querySelector('.login-card [style*="Build:"]');if(build)build.textContent='Build: '+KS_V8;
+function openMdeScanner(){
+  openScanner('mde');
+  const title=document.querySelector('.scan-title'),lead=document.querySelector('.scan-lead');
+  if(title)title.textContent='MDE-Produktabfrage';
+  if(lead)lead.textContent='Barcode nur in den grünen Rahmen halten. Preis, Foto und Lagerbestand erscheinen automatisch – ohne Knopfdruck.';
 }
 
-const _renderAllV7=renderAll;
-renderAll=function(){state.storeProfiles=state.storeProfiles||{};(state.products||[]).forEach(p=>{if(typeof p.lowStock==='undefined')p.lowStock=5});_renderAllV7();installV8Buttons()};
+const __extendedAcceptScannedCode=acceptScannedCode;
+acceptScannedCode=function(value){
+  const val=String(value||'').trim();
+  if(scanMode!=='mde')return __extendedAcceptScannedCode(val);
+  const now=Date.now();if(val===scanLastValue&&now-scanLastAt<350)return true;
+  const p=state.products.find(x=>String(x.barcode)===val&&productAllowed(x));
+  if(!p)return __extendedAcceptScannedCode(val);
+  scanLastValue=val;scanLastAt=now;scanBeep('ok');flashScanner();
+  scannerStatus(`✓ ${p.name} gefunden`,true);
+  setTimeout(()=>{stopScanner();closeModal();openMdeProduct(p.id)},90);
+  return true;
+};
 
-/* Zusätzliche Firmendaten werden über denselben Online-Snapshot übertragen. */
-const _scheduleRemoteCompanyStatePushV7=scheduleRemoteCompanyStatePush;
-scheduleRemoteCompanyStatePush=function(){_scheduleRemoteCompanyStatePushV7();if(!remoteDataReady||!ksToken()||!currentUser)return;setTimeout(()=>ksApi('save_company_state',{companyState:{store:state.store,storeType:state.storeType,customStores:state.customStores||[],storeProfiles:state.storeProfiles||{}}}).catch(()=>{}),360)};
-const _applyRemoteCompanyDataV7=applyRemoteCompanyData;
-applyRemoteCompanyData=function(data,opts={}){_applyRemoteCompanyDataV7(data,opts);if(data?.companyState){if(Array.isArray(data.companyState.customStores))state.customStores=data.companyState.customStores;if(data.companyState.storeProfiles&&typeof data.companyState.storeProfiles==='object')state.storeProfiles=data.companyState.storeProfiles;save();if(!opts.initial)renderAll()}};
+function openMdeProduct(id){
+  const p=state.products.find(x=>x.id===id);if(!p)return;
+  const stock=Math.max(0,Number(p.stock)||0),available=stock>0;
+  modal('MDE · Produkt gefunden',`
+    <div class="mde-product">
+      <img src="${escAttr(realPhotoUrl(p))}" alt="${escAttr(p.name)}" onerror="this.src=productFallbackImage({name:'Produkt',emoji:'📦'})">
+      <div><div class="scan-kicker">${available?'● VERFÜGBAR':'● NICHT VERFÜGBAR'}</div><h2 style="margin:4px 0 7px">${esc(p.name)}</h2><div class="mde-price">${p.weighted?`${euro(weightedRate(p))} / ${p.weightUnit}`:euro(p.price)}</div><div class="helper" style="margin-top:7px;font-family:monospace">${esc(p.barcode)}</div></div>
+    </div>
+    <div class="mde-facts"><div class="mde-fact"><small>Lagerbestand</small><b>${num(stock)} ${p.weighted?p.weightUnit:(p.unit||'Stück')}</b></div><div class="mde-fact"><small>Kategorie</small><b>${esc(p.cat||'Artikel')}</b></div><div class="mde-fact"><small>Verkaufsart</small><b>${p.weighted?'Menge/Gewicht':'Stückartikel'}</b></div><div class="mde-fact"><small>Artikelnummer</small><b>${esc(String(p.id))}</b></div></div>
+  `,`<button class="btn" onclick="closeModal();openMdeScanner()">▥ Nächstes Produkt</button><button class="btn" onclick="closeModal();openInventoryProduct(${p.id})">📦 Bestand ändern</button><button class="btn green" ${available?'':'disabled'} onclick="mdeAddProduct(${p.id})">＋ Zum Kunden-Einkauf</button>`,true);
+}
 
-// Scannerbibliothek bereits beim App-Start laden, nicht erst nach Öffnen der Kamera.
-setTimeout(()=>{try{ensureZXing()}catch(e){}},100);
-installV8Buttons();renderAll();
+function mdeAddProduct(id){
+  const p=state.products.find(x=>x.id===id);if(!p||Number(p.stock)<=0)return toast('Artikel ist nicht verfügbar','bad');
+  closeModal();
+  if(p.weighted)openProductWeight(id);else{addScannedRegularProduct(p);toast(`${p.name} zum Kunden-Einkauf hinzugefügt`,'good');setTimeout(openMdeScanner,180)}
+}
+
+function openInventory(query=''){
+  if(!isOwner())return toast('Nur Admins dürfen Lagerbestände ändern','bad');
+  const q=String(query).toLowerCase();
+  const products=(state.products||[]).filter(productAllowed).filter(p=>!q||`${p.name} ${p.barcode}`.toLowerCase().includes(q));
+  modal('Lager & Verfügbarkeit',`<div class="field" style="margin-bottom:10px"><span>⌕</span><input id="inventorySearch" value="${escAttr(query)}" placeholder="Produkt oder Barcode" oninput="renderInventoryRows(this.value)"></div><div id="inventoryRows">${inventoryRowsHtml(products)}</div>`,`<button class="btn" onclick="closeModal()">Schließen</button><button class="btn green" onclick="saveAllInventory()">Alle Bestände speichern</button>`,true);
+}
+function inventoryRowsHtml(products){return products.length?products.map(p=>`<div class="inventory-row" data-search="${escAttr(`${p.name} ${p.barcode}`.toLowerCase())}"><div><b>${esc(p.name)}</b><small style="display:block;color:#738397">${esc(p.barcode)} · ${euro(p.price)}</small></div><input id="stock_${p.id}" inputmode="decimal" value="${num(p.stock||0)}" aria-label="Bestand ${escAttr(p.name)}"><button class="btn soft" onclick="saveInventoryProduct(${p.id})">Speichern</button></div>`).join(''):'<div class="helper">Keine Produkte gefunden.</div>'}
+function renderInventoryRows(q){document.querySelectorAll('#inventoryRows .inventory-row').forEach(row=>row.style.display=row.dataset.search.includes(String(q).toLowerCase())?'grid':'none')}
+function saveInventoryProduct(id){const p=state.products.find(x=>x.id===id),el=document.getElementById(`stock_${id}`);if(!p||!el)return;const v=parseFloat(el.value.replace(',','.'));if(!isFinite(v)||v<0)return toast('Ungültiger Bestand','bad');p.stock=+v.toFixed(3);save();remoteUpsertProduct(p,{silent:true});renderProducts();toast(`${p.name}: Bestand gespeichert`,'good')}
+function saveAllInventory(){document.querySelectorAll('#inventoryRows .inventory-row').forEach(row=>{const el=row.querySelector('input');if(!el)return;const id=Number(el.id.replace('stock_','')),p=state.products.find(x=>x.id===id),v=parseFloat(el.value.replace(',','.'));if(p&&isFinite(v)&&v>=0){p.stock=+v.toFixed(3);remoteUpsertProduct(p,{silent:true})}});save();closeModal();renderProducts();toast('Lagerbestände gespeichert','good')}
+function openInventoryProduct(id){const p=state.products.find(x=>x.id===id);if(!p)return;modal(`Bestand · ${esc(p.name)}`,`<div class="form-group"><label>Aktueller Lagerbestand</label><input id="singleStock" inputmode="decimal" value="${num(p.stock||0)}"></div><div class="form-group"><label>Warnung ab</label><input id="singleLowStock" inputmode="decimal" value="${num(p.lowStockAt||5)}"></div>`,`<button class="btn" onclick="openMdeProduct(${id})">Zurück</button><button class="btn green" onclick="saveSingleStock(${id})">Speichern</button>`)}
+function saveSingleStock(id){const p=state.products.find(x=>x.id===id),v=parseFloat((document.getElementById('singleStock').value||'').replace(',','.')),l=parseFloat((document.getElementById('singleLowStock').value||'').replace(',','.'));if(!p||!isFinite(v)||v<0)return toast('Ungültiger Bestand','bad');p.stock=v;p.lowStockAt=isFinite(l)&&l>=0?l:5;save();remoteUpsertProduct(p);closeModal();renderProducts();openMdeProduct(id)}
+
+const __extendedFinishPayment=finishPayment;
+finishPayment=function(type){
+  const cartSnapshot=(state.cart||[]).map(x=>({...x})),before=(state.receipts||[]).length;
+  __extendedFinishPayment(type);
+  if((state.receipts||[]).length<=before)return;
+  const receipt=state.receipts[0];
+  receipt.store=activeStoreDisplayName();receipt.storeType=state.storeType;receipt.logo=(state.storeProfiles?.[state.storeType]?.logo)||state.logo||'';
+  cartSnapshot.forEach(line=>{const p=state.products.find(x=>x.id===line.productId);if(!p)return;const used=line.weighted?Number(line.weight)||0:Number(line.qty)||1;p.stock=Math.max(0,+((Number(p.stock)||0)-used).toFixed(3));remoteUpsertProduct(p,{silent:true})});
+  save();remoteRecordReceipt(receipt);renderProducts();
+};
+
+function remainingReturnQty(r,index){const item=r.items[index],used=(r.refundedItems||{})[index]||0,max=item.weighted?Math.abs(Number(item.weight)||0):Math.abs(Number(item.qty)||1);return Math.max(0,+(max-used).toFixed(6))}
+function openPartialRefund(id){const r=state.receipts.find(x=>x.id===id);if(!r||r.type==='refund')return;const lines=r.items.map((x,i)=>{const remain=remainingReturnQty(r,i);return `<label class="refund-line"><input type="checkbox" class="refundPick" data-index="${i}" ${remain<=0?'disabled':''}><div><b>${esc(x.name)}</b><small style="display:block;color:#738397">Noch rückgabefähig: ${x.weighted?formatMeasure(remain,x.weightUnit):`${num(remain)} Stück`}</small></div><input class="refundQty" data-index="${i}" type="number" min="0" max="${remain}" step="${x.weighted?'0.001':'1'}" value="${remain}" ${remain<=0?'disabled':''}></label>`}).join('');modal(`Teilrückgabe · Bon ${r.id}`,`<div class="helper" style="margin-bottom:10px">Nur die zurückgegebenen Artikel markieren und Menge wählen. Dafür wird ein neuer Rückgabebon erstellt.</div>${lines}`,`<button class="btn" onclick="showReceipt('${id}')">Abbrechen</button><button class="btn danger" onclick="completePartialRefund('${id}')">Rückgabe buchen</button>`,true)}
+function completePartialRefund(id){const r=state.receipts.find(x=>x.id===id);if(!r)return;const selected=[...document.querySelectorAll('.refundPick:checked')];if(!selected.length)return toast('Mindestens einen Artikel auswählen','bad');const items=[];let sum=0;r.refundedItems=r.refundedItems||{};for(const box of selected){const i=Number(box.dataset.index),src=r.items[i],remain=remainingReturnQty(r,i),input=document.querySelector(`.refundQty[data-index="${i}"]`),qty=Math.min(remain,Math.max(0,Number(input?.value)||0));if(qty<=0)continue;const full=src.weighted?Math.abs(Number(src.weight)||0):Math.abs(Number(src.qty)||1),ratio=full?qty/full:0,line=-Math.abs(Number(src.linePrice)||0)*ratio;items.push({...src,qty:src.weighted?1:-qty,weight:src.weighted?-qty:src.weight,linePrice:+line.toFixed(2),costTotal:-Math.abs(Number(src.costTotal)||0)*ratio});sum+=line;r.refundedItems[i]=+((r.refundedItems[i]||0)+qty).toFixed(6);const p=state.products.find(x=>x.id===src.productId);if(p){p.stock=+((Number(p.stock)||0)+qty).toFixed(3);remoteUpsertProduct(p,{silent:true})}}if(!items.length)return toast('Keine gültige Menge ausgewählt','bad');const rr={id:uid(),date:new Date().toISOString(),type:'refund',originalId:r.id,store:r.store,storeType:r.storeType,logo:r.logo,items,subtotal:+sum.toFixed(2),discount:0,coupon:null,total:+sum.toFixed(2),vat:+(sum*19/119).toFixed(2),payment:r.payment,paymentMethod:r.paymentMethod,companyId:r.companyId,cashierUsername:currentUser?.username||'admin',note:`Teilrückgabe zu Bon ${r.id}`};rr.receiptCode=receiptBarcode(rr);state.receipts.unshift(rr);state.sales=+(state.sales+rr.total).toFixed(2);state.tx+=1;save();remoteRecordReceipt(rr);closeModal();renderAll();showReceipt(rr.id);toast('Teilrückgabe verbucht und Bestand erhöht','good')}
+
+showReceipt=function(id){const r=state.receipts.find(x=>x.id===id);if(!r)return;const remaining=r.type!=='refund'&&r.items.some((x,i)=>remainingReturnQty(r,i)>0);modal(`${r.type==='refund'?'Rückgabebon':'Bon'} ${r.id}`,`<div style="display:flex;justify-content:center">${receiptHtml(r)}</div>`,`<button class="btn" onclick="closeModal()">Schließen</button><button class="btn" onclick="editReceipt('${r.id}')">Bearbeiten</button>${remaining?`<button class="btn danger" onclick="openPartialRefund('${r.id}')">↩ Artikel zurückgeben</button>`:''}<button class="btn green" onclick="printReceipts(['${r.id}'])">Drucken / PDF</button>`)};
+
+function toggleCoupon(code){const c=state.coupons.find(x=>normalizeCouponCode(x.code)===normalizeCouponCode(code));if(!c)return;c.active=!c.active;save();remoteUpsertCoupon(c);openCoupons()}
+function deleteCoupon(code){const c=state.coupons.find(x=>normalizeCouponCode(x.code)===normalizeCouponCode(code));if(!c||!confirm(`Coupon ${c.code} löschen?`))return;state.deletedCouponCodes=Array.isArray(state.deletedCouponCodes)?state.deletedCouponCodes:[];state.deletedCouponCodes.push(normalizeCouponCode(c.code));state.coupons=state.coupons.filter(x=>x!==c);save();closeModal();openCoupons();toast('Coupon gelöscht','good')}
+openCoupons=function(){if(!isOwner())return toast('Nur Firmen-Admin oder Groß-Admin darf Coupons verwalten','bad');modal('Angebote & Coupons',`<div class="helper" style="margin-bottom:12px">Gedruckte Zeitungscoupons werden beim Bezahlen eingetippt oder automatisch mit der Kamera gescannt.</div><div class="coupon-grid">${state.coupons.map(c=>`<div class="coupon-card"><div class="code">${esc(c.code)}</div><small>${esc(c.label)}${c.min?` · ab ${euro(c.min)}`:''}</small><div class="pill">${c.active?'AKTIV':'INAKTIV'}</div><div class="coupon-actions"><button class="btn soft" onclick="toggleCoupon('${escAttr(c.code)}')">${c.active?'Deaktivieren':'Aktivieren'}</button><button class="btn danger" onclick="deleteCoupon('${escAttr(c.code)}')">Löschen</button></div></div>`).join('')}</div><div class="hr"></div><h4 style="margin:0 0 10px">Neuen Zeitungscoupon anlegen</h4><div class="form-row"><div class="form-group"><label>Code</label><input id="newCouponCode" placeholder="z. B. 8005 2364" oninput="this.value=formatCouponCode(this.value)"></div><div class="form-group"><label>Rabattart</label><select id="newCouponType"><option value="fixed">Fester Betrag €</option><option value="percent">Prozent %</option></select></div></div><div class="form-row"><div class="form-group"><label>Wert</label><input id="newCouponValue" inputmode="decimal" placeholder="10"></div><div class="form-group"><label>Mindest-Einkauf €</label><input id="newCouponMin" inputmode="decimal" value="0"></div></div>`,`<button class="btn" onclick="closeModal()">Schließen</button><button class="btn green" onclick="createCoupon()">Coupon aktivieren</button>`,true)};
+
+renderCustomStoreCards=function(){const root=document.getElementById('customStoreCards');if(!root)return;root.innerHTML=(state.customStores||[]).map(s=>`<div class="custom-store-wrap"><button class="store-option" style="width:100%" onclick="selectStore('${escAttr(s.id)}')"><div class="store-visual store-new"><div>${esc(s.icon||'🏪')}</div></div><strong>${esc(s.name)}</strong><span>Eigener Laden · selbst befüllbar</span></button><div class="custom-store-actions"><button class="btn soft" onclick="editCustomStore('${escAttr(s.id)}')">✎ Bearbeiten</button><button class="btn danger" onclick="deleteCustomStore('${escAttr(s.id)}')">Löschen</button></div></div>`).join('')};
+function editCustomStore(id){const s=state.customStores.find(x=>x.id===id);if(!s)return;modal('Eigenen Laden bearbeiten',`<div class="form-group"><label>Ladenname</label><input id="editCustomStoreName" value="${escAttr(s.name)}"></div><div class="form-group"><label>Symbol</label><input id="editCustomStoreIcon" value="${escAttr(s.icon||'🏪')}"></div>`,`<button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn green" onclick="saveCustomStore('${escAttr(id)}')">Speichern</button>`)}
+function saveCustomStore(id){const s=state.customStores.find(x=>x.id===id);if(!s)return;s.name=document.getElementById('editCustomStoreName').value.trim()||s.name;s.icon=document.getElementById('editCustomStoreIcon').value.trim()||'🏪';save();scheduleRemoteCompanyStatePush();closeModal();refreshStoreChooserCounts();renderHeader();toast('Laden gespeichert','good')}
+function deleteCustomStore(id){const s=state.customStores.find(x=>x.id===id);if(!s||!confirm(`${s.name} und seine Produkte wirklich löschen?`))return;state.products=state.products.filter(p=>String(p.customStoreId)!==String(id));state.customStores=state.customStores.filter(x=>x.id!==id);if(state.storeType===id)state.storeType='Alle';save();scheduleRemoteCompanyStatePush();refreshStoreChooserCounts();renderAll();toast('Eigener Laden gelöscht','good')}
+
+const __extendedRenderHeader=renderHeader;
+function activeStoreProfile(){return state.storeProfiles?.[state.storeType]||{}}
+function activeStoreDisplayName(){return activeStoreProfile().name||currentStoreLabel()}
+renderHeader=function(){__extendedRenderHeader();const sub=document.getElementById('storeSub');if(sub)sub.textContent=`${activeStoreDisplayName()} · ${state.store}`};
+openStore=function(){const profile=activeStoreProfile();window.__draftStoreLogo=profile.logo??state.logo??'';modal('Bon & Laden',`<div class="form-group"><label>Name dieses Ladens</label><input id="storeName" value="${escAttr(profile.name||currentStoreLabel())}"></div><div class="form-group"><label>Logo für diesen Laden</label><div id="storeLogoPreview" style="height:90px;border:1px solid #dce5eb;border-radius:12px;display:grid;place-items:center;overflow:hidden;margin-bottom:8px">${window.__draftStoreLogo?`<img src="${escAttr(window.__draftStoreLogo)}" style="max-width:100%;max-height:100%;object-fit:contain;filter:grayscale(1)">`:'Kein Logo – Ladenname wird verwendet'}</div><label class="btn soft" style="cursor:pointer">Logo hochladen<input type="file" accept="image/*" hidden onchange="storeLogoSelected(this)"></label> <button class="btn danger" onclick="window.__draftStoreLogo='';document.getElementById('storeLogoPreview').textContent='Kein Logo – Ladenname wird verwendet'">Logo entfernen</button></div><div class="helper">Name und Logo gelten nur für ${esc(currentStoreLabel())}. Das Logo wird auf dem Bon automatisch schwarz-weiß.</div>`,`<button class="btn" onclick="closeModal()">Abbrechen</button><button class="btn green" onclick="saveStore()">Speichern</button>`)};
+saveStore=function(){const name=document.getElementById('storeName').value.trim()||currentStoreLabel();state.storeProfiles=state.storeProfiles||{};state.storeProfiles[state.storeType]={...(state.storeProfiles[state.storeType]||{}),name,logo:window.__draftStoreLogo||''};if(isCustomStoreType(state.storeType)){const s=state.customStores.find(x=>x.id===state.storeType);if(s)s.name=name}save();scheduleRemoteCompanyStatePush();closeModal();renderHeader();toast('Ladenname und Bon-Logo gespeichert','good')};
+const __extendedReceiptHtml=receiptHtml;
+receiptHtml=function(r,print=false){const old=state.logo;if(Object.prototype.hasOwnProperty.call(r,'logo'))state.logo=r.logo;const html=__extendedReceiptHtml(r,print);state.logo=old;return html};
+const __extendedScheduleRemoteCompanyStatePush=scheduleRemoteCompanyStatePush;
+scheduleRemoteCompanyStatePush=function(){__extendedScheduleRemoteCompanyStatePush();if(!remoteDataReady||!ksToken()||!currentUser)return;setTimeout(()=>ksApi('save_company_state',{companyState:{store:state.store,storeType:state.storeType,customStores:state.customStores,storeProfiles:state.storeProfiles}}).catch(()=>{}),260)};
+const __extendedApplyRemoteSnapshot=applyRemoteSnapshot;
+applyRemoteSnapshot=function(snapshot){const selected=state.storeType,custom=(state.customStores||[]).some(s=>s.id===selected);__extendedApplyRemoteSnapshot(snapshot);if(custom)state.storeType=selected};
+const __extendedApplyRemoteCompanyData=applyRemoteCompanyData;
+applyRemoteCompanyData=function(data,opts={}){const localStores=state.customStores||[],localProfiles=state.storeProfiles||{},deleted=Array.isArray(state.deletedCouponCodes)?state.deletedCouponCodes:[];__extendedApplyRemoteCompanyData(data,opts);if(data?.companyState?.customStores)state.customStores=data.companyState.customStores;else state.customStores=localStores;if(data?.companyState?.storeProfiles)state.storeProfiles=data.companyState.storeProfiles;else state.storeProfiles=localProfiles;state.deletedCouponCodes=deleted;state.coupons=(state.coupons||[]).filter(c=>!deleted.includes(normalizeCouponCode(c.code)));ensureExtendedState();save();if(!opts.initial)renderAll()};
+
+function openCashClose(){const today=todayReceipts(),cash=today.filter(r=>r.payment==='cash').reduce((s,r)=>s+Number(r.total||0),0),card=today.filter(r=>r.payment==='card').reduce((s,r)=>s+Number(r.total||0),0);modal('Kassenabschluss',`<div class="dashboard-grid"><div class="dash-kpi"><small>Bar</small><b>${euro(cash)}</b></div><div class="dash-kpi"><small>Karte</small><b>${euro(card)}</b></div><div class="dash-kpi good"><small>Gesamt</small><b>${euro(cash+card)}</b></div><div class="dash-kpi"><small>Vorgänge</small><b>${today.length}</b></div></div><div class="form-group"><label>Gezähltes Bargeld in der Kasse</label><input id="countedCash" inputmode="decimal" value="${num(cash)}" oninput="previewCashDifference()"></div><div class="calc"><span>Differenz</span><b id="cashDifference">0,00 €</b></div>`,`<button class="btn" onclick="closeModal()">Schließen</button><button class="btn green" onclick="saveCashClose(${cash})">Abschluss speichern</button>`,true)}
+function previewCashDifference(){const expected=todayReceipts().filter(r=>r.payment==='cash').reduce((s,r)=>s+Number(r.total||0),0),counted=parseFloat((document.getElementById('countedCash')?.value||'0').replace(',','.'))||0;document.getElementById('cashDifference').textContent=euro(counted-expected)}
+function saveCashClose(expected){const counted=parseFloat((document.getElementById('countedCash').value||'0').replace(',','.'));if(!isFinite(counted))return toast('Ungültiger Bargeldbetrag','bad');state.cashClosings.unshift({id:uid(),date:new Date().toISOString(),expected,counted,difference:+(counted-expected).toFixed(2),cashier:currentUser?.username||'admin'});save();closeModal();toast('Kassenabschluss gespeichert','good')}
+
+function openDataTools(){modal('Daten sichern & wiederherstellen',`<div class="helper" style="margin-bottom:14px">Speichert Produkte, Lagerbestände, eigene Läden, Coupons und Bons als Sicherungsdatei.</div><div style="display:grid;gap:9px"><button class="btn green" onclick="exportKassenData()">⇩ Sicherung herunterladen</button><label class="btn soft" style="text-align:center;cursor:pointer">⇧ Sicherung einlesen<input type="file" accept="application/json" hidden onchange="importKassenData(this)"></label><button class="btn" onclick="installKassenApp()">＋ KassenSpiel zum Startbildschirm</button></div>`,`<button class="btn" onclick="closeModal()">Schließen</button>`)}
+function exportKassenData(){const blob=new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),state},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`KassenSpiel-Sicherung-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Sicherung erstellt','good')}
+function importKassenData(input){const file=input.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const data=JSON.parse(reader.result);if(!data?.state||!Array.isArray(data.state.products))throw new Error();if(!confirm('Aktuelle Daten durch diese Sicherung ersetzen?'))return;state={...state,...data.state};ensureExtendedState();save();closeModal();renderAll();toast('Sicherung wiederhergestellt','good')}catch(e){toast('Diese Sicherungsdatei ist ungültig','bad')}};reader.readAsText(file)}
+let deferredInstallPrompt=null;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e});async function installKassenApp(){if(deferredInstallPrompt){await deferredInstallPrompt.prompt();deferredInstallPrompt=null}else toast('Im Browser „Zum Home-Bildschirm“ auswählen','good')}
+if('serviceWorker' in navigator&&location.protocol.startsWith('http'))window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+
+save();renderAll();
 </script>
 
 </body></html>
