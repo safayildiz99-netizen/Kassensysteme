@@ -122,3 +122,15 @@ Das Supabase-Projekt „Kassensystem“ war pausiert und wurde wieder gestartet.
 - QR, Aztec, Data Matrix und PDF417 bleiben enthalten.
 - Event-/Boarding-Pass-Scans werden im angemeldeten Konto gespeichert und über den vorhandenen Account-Sync auf andere Geräte übertragen.
 - Der bestehende Produkt-Barcode-Scanner wurde nicht verändert.
+
+
+## V17 Eventkasse
+- Event ist jetzt ein eigener Laden in der Geschäftsauswahl.
+- Zwei klare Schritte: Tickets zuerst speichern, später beim Einlass einlösen.
+- Name der Person kann vor dem Speichern eingetragen und später geändert werden.
+- QR, Boarding Pass, PDF417, Aztec, Data Matrix und normale Barcodes werden unterstützt.
+- Lautes eigenes Scan-Geräusch + Vibration für Speichern, Einlösen, Warnung und Fehler.
+- Bereits eingelöste Tickets werden gesperrt. Eine erneute Einlösung ist nur nach ausdrücklicher Bestätigung möglich.
+- Einzelne Tickets können direkt gelöscht werden oder auf Handy/iPad durch Wischen nach links.
+- Event-Tickets bleiben im Konto gespeichert und werden über den bestehenden Kontosync zwischen Geräten übertragen.
+- Der vorhandene Produkt-Barcode-Scanner wurde nicht verändert.

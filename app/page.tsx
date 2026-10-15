@@ -21,7 +21,7 @@ type Coupon={id:number;code:string;label:string;amount:number;active:boolean};
 type AuthRole="superadmin"|"company_admin"|"employee";
 type AuthCompany={id:string;name:string;code:string;createdAt:number};
 type AuthUser={id:string;companyId:string|null;username:string;password:string;displayName:string;role:AuthRole;active:boolean;createdAt:number};
-type EventScanRecord={id:string;code:string;format:string;kind:string;time:string;passenger?:string;from?:string;to?:string;flight?:string;seat?:string};
+type EventScanRecord={id:string;code:string;format:string;kind:string;time:string;passenger?:string;from?:string;to?:string;flight?:string;seat?:string;personName?:string;status?:"saved"|"redeemed";savedAt?:string;redeemedAt?:string;lastRedeemedAt?:string;redeemCount?:number};
 type AccountState={customProducts:Product[];priceOverrides:Record<string,number>;coupons:Coupon[];settings:Settings;sales:number;transactions:number;stocks:Record<string,number>;customStores:CustomStore[];receiptHistory:Receipt[];eventScanHistory:EventScanRecord[]};
 type NativeBarcodeDetector={detect:(source:HTMLVideoElement|HTMLCanvasElement)=>Promise<Array<{rawValue:string}>>};
 type NativeBarcodeDetectorConstructor=new(options?:{formats?:string[]})=>NativeBarcodeDetector;
@@ -73,7 +73,7 @@ const shopProducts:Product[]=[
   {id:504,name:"E-Bike",price:2899,category:"Fahrräder",icon:"🚲",unit:"Fahrzeug",barcode:"550004",color:"#e6f0eb",storeType:"Fahrzeugladen",image:"https://images.unsplash.com/photo-1571068316344-75bc76f77890?auto=format&fit=crop&w=500&q=80"},
 ];
 const storeOptions:{type:StoreType;icon:string;description:string}[]=[
-  {type:"Tanke",icon:"⛽",description:"Kraftstoff, Autowäsche und Zubehör"},{type:"Supermarkt",icon:"🛒",description:"Lebensmittel, Getränke und Haushalt"},{type:"Spielzeugladen",icon:"🧸",description:"Spiele, Bausteine und Spielzeug"},{type:"Bank",icon:"🏦",description:"Bankgeschäfte und Services"},{type:"Möbelladen",icon:"🛋️",description:"Möbel und Einrichtung"},{type:"Fahrzeugladen",icon:"🚗",description:"Autos, Motorräder und Fahrräder"},{type:"Alle",icon:"▦",description:"Alle Läden und alle Produkte"},
+  {type:"Tanke",icon:"⛽",description:"Kraftstoff, Autowäsche und Zubehör"},{type:"Supermarkt",icon:"🛒",description:"Lebensmittel, Getränke und Haushalt"},{type:"Spielzeugladen",icon:"🧸",description:"Spiele, Bausteine und Spielzeug"},{type:"Bank",icon:"🏦",description:"Bankgeschäfte und Services"},{type:"Möbelladen",icon:"🛋️",description:"Möbel und Einrichtung"},{type:"Fahrzeugladen",icon:"🚗",description:"Autos, Motorräder und Fahrräder"},{type:"Event",icon:"🎟️",description:"Tickets, Boarding-Pässe und Einlass"},{type:"Alle",icon:"▦",description:"Alle Läden und alle Produkte"},
 ];
 type CommonsImageResponse={query?:{pages?:Record<string,{imageinfo?:Array<{thumburl?:string;url?:string}>}>}};
 const catalogProducts=[...defaultProducts,...shopProducts];
@@ -135,7 +135,14 @@ export default function Home(){
   const videoRef=useRef<HTMLVideoElement|null>(null),scannerControlsRef=useRef<IScannerControls|null>(null),scanLockRef=useRef(false);
   const productVideoRef=useRef<HTMLVideoElement|null>(null),productStreamRef=useRef<MediaStream|null>(null);
   const [showEventScanner,setShowEventScanner]=useState(false),[eventScannerError,setEventScannerError]=useState(""),[eventScanStatus,setEventScanStatus]=useState(""),[eventManualCode,setEventManualCode]=useState(""),[eventScanHistory,setEventScanHistory]=useState<EventScanRecord[]>([]);
+  const [eventScanMode,setEventScanMode]=useState<"save"|"redeem">("save"),[eventPersonName,setEventPersonName]=useState(""),[duplicateEvent,setDuplicateEvent]=useState<EventScanRecord|null>(null),[eventSwipedId,setEventSwipedId]=useState<string|null>(null);
   const eventVideoRef=useRef<HTMLVideoElement|null>(null),eventScannerControlsRef=useRef<IScannerControls|null>(null),eventScanLockRef=useRef(false),eventNativeDetectorRef=useRef<any>(null),eventNativeFrameRef=useRef<number|null>(null),eventNativeBusyRef=useRef(false),eventLastScanRef=useRef<{code:string;at:number}>({code:"",at:0});
+  const eventHistoryRef=useRef<EventScanRecord[]>([]),eventModeRef=useRef<"save"|"redeem">("save"),eventPersonNameRef=useRef(""),eventIgnoreRef=useRef<{code:string;until:number}>({code:"",until:0}),eventSwipeStartRef=useRef<{id:string;x:number}|null>(null),eventAudioRef=useRef<AudioContext|null>(null);
+
+  useEffect(()=>{eventHistoryRef.current=eventScanHistory},[eventScanHistory]);
+  useEffect(()=>{eventModeRef.current=eventScanMode},[eventScanMode]);
+  useEffect(()=>{eventPersonNameRef.current=eventPersonName},[eventPersonName]);
+
 
   const accountSaveTimerRef=useRef<number|null>(null),accountPollTimerRef=useRef<number|null>(null),lastRemoteStateRef=useRef(0),skipNextAccountSaveRef=useRef(false),localAccountSavePendingRef=useRef(false);
 
@@ -216,31 +223,175 @@ export default function Home(){
     const seat=clean.slice(48,52).trim();
     return{passenger,from,to,flight:`${carrier}${flightNo}`.trim(),seat};
   };
-  const rememberEventScan=(record:EventScanRecord)=>setEventScanHistory(current=>{
-    const next=[record,...current].slice(0,200);
-    try{localStorage.setItem("kassenspiel-v16-event-scans",JSON.stringify(next))}catch{}
-    return next;
-  });
+  const isEventRedeemed=(record:EventScanRecord)=>record.status==="redeemed"||Number(record.redeemCount||0)>0||!!record.redeemedAt;
+  const eventDisplayName=(record:EventScanRecord)=>record.personName?.trim()||record.passenger?.trim()||"Ohne Namen";
+
+  const commitEventHistory=(update:(current:EventScanRecord[])=>EventScanRecord[])=>{
+    setEventScanHistory(current=>{
+      const next=update(current).slice(0,500);
+      eventHistoryRef.current=next;
+      try{localStorage.setItem("kassenspiel-v16-event-scans",JSON.stringify(next))}catch{}
+      return next;
+    });
+  };
+
+  const unlockEventAudio=()=>{
+    try{
+      const AudioContextClass=window.AudioContext||(window as typeof window&{webkitAudioContext:typeof AudioContext}).webkitAudioContext;
+      if(!eventAudioRef.current)eventAudioRef.current=new AudioContextClass();
+      if(eventAudioRef.current.state==="suspended")void eventAudioRef.current.resume();
+    }catch{}
+  };
+  const eventSound=(kind:"save"|"redeem"|"warn"|"bad")=>{
+    try{
+      unlockEventAudio();
+      const context=eventAudioRef.current;
+      if(!context)return;
+      const patterns={
+        save:[[880,0,.07],[1175,.075,.09]],
+        redeem:[[740,0,.07],[1046,.07,.08],[1396,.15,.11]],
+        warn:[[330,0,.11],[330,.14,.11]],
+        bad:[[190,0,.18]]
+      } as const;
+      for(const [frequency,delay,duration] of patterns[kind]){
+        const oscillator=context.createOscillator(),gain=context.createGain();
+        oscillator.type=kind==="bad"?"square":"sine";
+        oscillator.frequency.setValueAtTime(frequency,context.currentTime+delay);
+        gain.gain.setValueAtTime(.32,context.currentTime+delay);
+        gain.gain.exponentialRampToValueAtTime(.001,context.currentTime+delay+duration);
+        oscillator.connect(gain);gain.connect(context.destination);
+        oscillator.start(context.currentTime+delay);
+        oscillator.stop(context.currentTime+delay+duration);
+      }
+      if(navigator.vibrate)navigator.vibrate(kind==="redeem"?[35,35,55]:kind==="warn"?[80,40,80]:kind==="bad"?120:40);
+    }catch{}
+  };
+
+  const openEventScanner=(mode:"save"|"redeem")=>{
+    unlockEventAudio();
+    eventModeRef.current=mode;
+    setEventScanMode(mode);
+    setDuplicateEvent(null);
+    eventScanLockRef.current=false;
+    setEventScannerError("");
+    setEventScanStatus(mode==="save"?"Bereit zum Speichern neuer Tickets":"Bereit für Einlass / Einlösen");
+    setShowEventScanner(true);
+  };
+  const setEventMode=(mode:"save"|"redeem")=>{
+    eventModeRef.current=mode;
+    setEventScanMode(mode);
+    setDuplicateEvent(null);
+    eventScanLockRef.current=false;
+    setEventScanStatus(mode==="save"?"Speichermodus: Ticket wird registriert, aber noch NICHT eingelöst.":"Einlassmodus: Nur vorher gespeicherte Tickets werden eingelöst.");
+  };
+
+  const renameEventPerson=(record:EventScanRecord)=>{
+    const next=window.prompt("Name der Person:",eventDisplayName(record)==="Ohne Namen"?"":eventDisplayName(record));
+    if(next===null)return;
+    commitEventHistory(current=>current.map(item=>item.id===record.id?{...item,personName:next.trim()}:item));
+  };
+  const deleteEventScan=(id:string)=>{
+    commitEventHistory(current=>current.filter(item=>item.id!==id));
+    setEventSwipedId(null);
+    setEventScanStatus("Ticket gelöscht");
+  };
+  const handleEventSwipeStart=(id:string,x:number)=>{eventSwipeStartRef.current={id,x}};
+  const handleEventSwipeEnd=(id:string,x:number)=>{
+    const start=eventSwipeStartRef.current;
+    eventSwipeStartRef.current=null;
+    if(!start||start.id!==id)return;
+    const diff=start.x-x;
+    if(diff>55)setEventSwipedId(id);
+    else if(diff<-35)setEventSwipedId(null);
+  };
+
+  const redeemEvent=(record:EventScanRecord,force=false)=>{
+    const nowIso=new Date().toISOString();
+    const nowLabel=new Date().toLocaleString("de-DE");
+    commitEventHistory(current=>current.map(item=>{
+      if(item.id!==record.id)return item;
+      const previous=Number(item.redeemCount||0);
+      return{
+        ...item,
+        status:"redeemed",
+        redeemedAt:item.redeemedAt||nowIso,
+        lastRedeemedAt:nowIso,
+        redeemCount:previous+1
+      };
+    }));
+    eventIgnoreRef.current={code:record.code,until:performance.now()+2400};
+    eventScanLockRef.current=false;
+    setDuplicateEvent(null);
+    setEventScanStatus(force?`✓ Erneut eingelöst · ${eventDisplayName(record)} · ${nowLabel}`:`✓ EINLASS OK · ${eventDisplayName(record)}`);
+    eventSound("redeem");
+  };
+
+  const dismissDuplicateEvent=()=>{
+    if(duplicateEvent)eventIgnoreRef.current={code:duplicateEvent.code,until:performance.now()+2500};
+    eventScanLockRef.current=false;
+    setDuplicateEvent(null);
+    setEventScanStatus("Mehrfacheinlösung abgebrochen");
+  };
+
   const acceptEventScan=(raw:string,format="BARCODE")=>{
     const code=raw.trim();
-    if(!code)return;
+    if(!code||eventScanLockRef.current)return;
     const now=performance.now();
+    if(eventIgnoreRef.current.code===code&&now<eventIgnoreRef.current.until)return;
     const last=eventLastScanRef.current;
-    if(last.code===code&&now-last.at<900)return;
+    if(last.code===code&&now-last.at<800)return;
     eventLastScanRef.current={code,at:now};
+
+    const mode=eventModeRef.current;
+    const history=eventHistoryRef.current;
+    const existing=history.find(item=>item.code===code);
+
+    if(mode==="redeem"){
+      if(!existing){
+        eventIgnoreRef.current={code,until:now+1800};
+        setEventScanStatus("✕ NICHT GESPEICHERT · Ticket zuerst im Speichermodus registrieren");
+        eventSound("bad");
+        return;
+      }
+      if(isEventRedeemed(existing)){
+        eventScanLockRef.current=true;
+        setDuplicateEvent(existing);
+        setEventScanStatus(`⚠ Bereits eingelöst · ${eventDisplayName(existing)}`);
+        eventSound("warn");
+        return;
+      }
+      redeemEvent(existing,false);
+      return;
+    }
+
+    if(existing){
+      eventIgnoreRef.current={code,until:now+1800};
+      setEventScanStatus(`⚠ Bereits gespeichert · ${eventDisplayName(existing)}`);
+      eventSound("warn");
+      return;
+    }
+
     const boarding=parseBoardingPass(code);
+    const manualName=eventPersonNameRef.current.trim();
     const record:EventScanRecord={
       id:`event-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
       code,
       format:eventFormatLabel(format),
       kind:boarding?"Boarding Pass":"Event-Ticket",
       time:new Date().toLocaleString("de-DE"),
+      savedAt:new Date().toISOString(),
+      status:"saved",
+      redeemCount:0,
+      personName:manualName||boarding?.passenger||"",
       ...(boarding||{})
     };
-    rememberEventScan(record);
-    setEventScanStatus(boarding?`✈ Boarding Pass erkannt & gespeichert${boarding.passenger?` · ${boarding.passenger}`:""}`:`✓ ${eventFormatLabel(format)} erkannt & im Konto gespeichert`);
+    commitEventHistory(current=>[record,...current]);
+    eventIgnoreRef.current={code,until:now+2000};
+    eventPersonNameRef.current="";
+    setEventPersonName("");
     setEventManualCode("");
-    beep();
+    setEventScanStatus(`✓ GESPEICHERT · ${eventDisplayName(record)} · noch nicht eingelöst`);
+    eventSound("save");
   };
   const stopEventScanner=()=>{
     eventScannerControlsRef.current?.stop();
@@ -257,6 +408,8 @@ export default function Home(){
       eventVideoRef.current.srcObject=null;
     }
     setShowEventScanner(false);
+    setDuplicateEvent(null);
+    eventScanLockRef.current=false;
     setEventScannerError("");
     setEventScanStatus("");
   };
@@ -303,7 +456,7 @@ export default function Home(){
       ).then(controls=>{
         if(cancelled){controls.stop();return}
         eventScannerControlsRef.current=controls;
-        setEventScanStatus("⚡ Schnellscan aktiv · QR + Boarding Pass + normale Barcodes");
+        setEventScanStatus(eventModeRef.current==="save"?"⚡ Schnellscan · Ticket speichern":"⚡ Schnellscan · Einlass / Ticket einlösen");
         const stream=video.srcObject as MediaStream|null;
         const track=stream?.getVideoTracks()[0];
         if(track){
@@ -349,7 +502,7 @@ export default function Home(){
 
         const detector=new Detector({formats:supported});
         eventNativeDetectorRef.current=detector;
-        setEventScanStatus("⚡ BLITZSCAN aktiv · Barcode einfach kurz vor die Kamera halten");
+        setEventScanStatus(eventModeRef.current==="save"?"⚡ BLITZSCAN · Ticket speichern":"⚡ BLITZSCAN · Einlass / Ticket einlösen");
 
         const frame=async()=>{
           if(cancelled||!eventNativeDetectorRef.current)return;
@@ -418,13 +571,91 @@ export default function Home(){
   const saveSettings=()=>{setSettings({storeName:storeDraft.trim()||"Mein Laden",logo:logoDraft});setShowSettings(false);setNotice("Bon-Design wurde gespeichert")};
   const saveReceipt=()=>{if(!receipt)return;const logo=settings.logo?`<img src="${settings.logo}" style="display:block;max-width:150px;max-height:70px;margin:0 auto;filter:grayscale(1)">`:`<h2>${settings.storeName}</h2>`;const lines=receipt.items.map(i=>`<div><span>${i.quantity} × ${i.name}</span><b>${money(i.quantity*i.price)}</b></div>`).join("");const barcodeCanvas=document.querySelector(".receipt-preview-modal .receipt-barcode canvas") as HTMLCanvasElement|null;const barcodeImage=barcodeCanvas?.toDataURL("image/png")||"";const html=`<!doctype html><meta charset="utf-8"><title>Bon ${receipt.number}</title><style>body{width:72mm;margin:0 auto;padding:6mm 4mm;font:12px monospace;color:#000}header{text-align:center}div{display:flex;justify-content:space-between;margin:5px 0}hr{border:0;border-top:1px dashed #000}.total{font-size:16px}.barcode{display:block;width:100%;height:55px;object-fit:fill;margin:12px 0 2px}</style><header>${logo}<p>${receipt.kind==="return"?"RÜCKGABEBON":"KASSENBON"}</p></header><p>${receipt.date} · Bon ${receipt.number}</p><hr>${lines}<hr><div class="total"><b>SUMME</b><b>${money(receipt.total)}</b></div><div><span>Zahlung</span><span>${receipt.payment}</span></div><hr>${barcodeImage?`<img class="barcode" src="${barcodeImage}">`:""}<p style="text-align:center">${receipt.barcode}<br><br>Barcode scannen, um den Bon digital zu öffnen.</p>`;const url=URL.createObjectURL(new Blob([html],{type:"text/html;charset=utf-8"}));const a=document.createElement("a");a.href=url;a.download=`Kassenbon-${receipt.number}.html`;a.click();URL.revokeObjectURL(url);setNotice("Bon wurde gespeichert")};
 
+
+  const savedEventCount=eventScanHistory.filter(item=>!isEventRedeemed(item)).length;
+  const redeemedEventCount=eventScanHistory.filter(item=>isEventRedeemed(item)).length;
+  const multipleRedeemCount=eventScanHistory.filter(item=>Number(item.redeemCount||0)>1).length;
+
+  const renderEventRows=(limit?:number)=>{
+    const rows=typeof limit==="number"?eventScanHistory.slice(0,limit):eventScanHistory;
+    if(!rows.length)return <p className="event-empty">Noch keine Tickets gespeichert.</p>;
+    return rows.map(scan=>{
+      const redeemed=isEventRedeemed(scan);
+      const swiped=eventSwipedId===scan.id;
+      return <div key={scan.id} className={`event-ticket-row ${swiped?"swiped":""}`} onTouchStart={e=>handleEventSwipeStart(scan.id,e.touches[0]?.clientX||0)} onTouchEnd={e=>handleEventSwipeEnd(scan.id,e.changedTouches[0]?.clientX||0)}>
+        <button className="event-swipe-delete" onClick={()=>deleteEventScan(scan.id)}>Löschen</button>
+        <article className={`event-ticket-card ${redeemed?"redeemed":"saved"}`}>
+          <span className="event-ticket-icon">{scan.kind==="Boarding Pass"?"✈️":"🎫"}</span>
+          <div className="event-ticket-main">
+            <div className="event-ticket-title"><strong>{eventDisplayName(scan)}</strong><span className={redeemed?"redeemed":"saved"}>{redeemed?"Eingelöst":"Gespeichert"}</span></div>
+            <small>{scan.kind} · {scan.format}{scan.from||scan.to?` · ${scan.from||"?"} → ${scan.to||"?"}`:""}{scan.flight?` · ${scan.flight}`:""}{scan.seat?` · Sitz ${scan.seat}`:""}</small>
+            <code>{scan.code}</code>
+            <div className="event-ticket-meta"><span>Gespeichert: {scan.time}</span>{redeemed&&<span>Eingelöst: {scan.lastRedeemedAt?new Date(scan.lastRedeemedAt).toLocaleString("de-DE"):scan.redeemedAt?new Date(scan.redeemedAt).toLocaleString("de-DE"):"—"}</span>}{Number(scan.redeemCount||0)>1&&<b>{scan.redeemCount}× eingelöst</b>}</div>
+          </div>
+          <div className="event-ticket-actions">
+            <button onClick={()=>renameEventPerson(scan)}>✎ Name</button>
+            <button className="delete" onClick={()=>deleteEventScan(scan.id)}>🗑</button>
+          </div>
+        </article>
+      </div>
+    });
+  };
+
+  const eventScannerOverlay=showEventScanner?<div className="modal-backdrop event-scanner-backdrop"><section className="event-scanner-modal">
+    <button className="modal-close" onClick={stopEventScanner}>×</button>
+    <span className="modal-kicker">EVENTKASSE · QR · BARCODE · BOARDING PASS</span>
+    <h2>{eventScanMode==="save"?"Tickets zuerst speichern":"Einlass – Tickets einlösen"}</h2>
+    <p>{eventScanMode==="save"?"Speichere die Tickets vor dem Event. Sie gelten danach noch NICHT als eingelöst.":"Scanne die Tickets der ankommenden Personen. Ein bereits eingelöstes Ticket wird sofort erkannt und gesperrt."}</p>
+    <div className="event-mode-switch">
+      <button className={eventScanMode==="save"?"active":""} onClick={()=>setEventMode("save")}><b>1</b> Tickets speichern</button>
+      <button className={eventScanMode==="redeem"?"active redeem":""} onClick={()=>setEventMode("redeem")}><b>2</b> Einlass / einlösen</button>
+    </div>
+    {eventScanMode==="save"&&<label className="event-person-input">Name der Person <span>(optional)</span><input value={eventPersonName} onChange={e=>{setEventPersonName(e.target.value);eventPersonNameRef.current=e.target.value}} placeholder="z. B. Max Mustermann"/></label>}
+    <div className="event-camera-view"><video ref={eventVideoRef} playsInline muted/><div className="event-scan-frame"><i/><i/><i/><i/><span/></div><small>⚡ QR-Code oder Barcode kurz in den Rahmen halten</small></div>
+    {eventScannerError&&<p className="scanner-error">{eventScannerError}</p>}
+    {eventScanStatus&&<p className={`event-scan-status ${eventScanMode}`}>{eventScanStatus}</p>}
+    <div className="event-manual-scan"><input value={eventManualCode} onChange={e=>setEventManualCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&acceptEventScan(eventManualCode,"MANUELL")} placeholder="QR-/Barcode-Inhalt manuell eingeben"/><button disabled={!eventManualCode.trim()} onClick={()=>acceptEventScan(eventManualCode,"MANUELL")}>{eventScanMode==="save"?"Speichern":"Einlösen"}</button></div>
+    <div className="event-scan-history"><div className="event-history-head"><div><strong>Zuletzt gespeicherte Tickets</strong><small> · nach links wischen oder 🗑 drücken</small></div></div>{renderEventRows(6)}</div>
+  </section></div>:null;
+
+  const duplicateEventOverlay=duplicateEvent?<div className="modal-backdrop event-duplicate-backdrop"><section className="event-duplicate-modal">
+    <div className="event-duplicate-symbol">⚠️</div>
+    <span className="modal-kicker">TICKET BEREITS GESCANNT</span>
+    <h2>Dieses Ticket wurde schon eingelöst</h2>
+    <p><b>{eventDisplayName(duplicateEvent)}</b><br/>{duplicateEvent.kind} · {duplicateEvent.format}</p>
+    <code>{duplicateEvent.code}</code>
+    <div className="event-duplicate-info"><span>Schon eingelöst</span><b>{Math.max(1,Number(duplicateEvent.redeemCount||1))}×</b></div>
+    <div className="event-duplicate-actions"><button onClick={dismissDuplicateEvent}>Nicht nochmal</button><button className="danger-allow" onClick={()=>redeemEvent(duplicateEvent,true)}>Trotzdem erneut einlösen</button></div>
+  </section></div>:null;
+
   if(!loggedIn)return <main className="login-page"><section className="login-card auth-login-card"><div className="login-brand"><div className="brand-mark"><span/><span/><span/></div><div><strong>KASSENSPIEL</strong><small>Supermarkt-Kassensimulator</small></div></div>{authView==="login"&&<><div className="login-copy"><span>GESCHÜTZTER KASSENBEREICH</span><h1>An der Kasse anmelden</h1><p>Melde dich mit deinem Kassenkonto an.</p></div><form onSubmit={login}><label>Benutzername<input autoFocus value={username} onChange={e=>setUsername(e.target.value)} placeholder="Benutzername"/></label><label>Passwort<input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Passwort"/></label>{loginError&&<p className="login-error">{loginError}</p>}{authNotice&&<p className="login-success">{authNotice}</p>}<button>Anmelden →</button></form><div className="auth-login-actions"><button onClick={()=>{setAuthView("company");setLoginError("");setAuthNotice("")}}>Firma registrieren</button><button onClick={()=>{setAuthView("employee");setLoginError("");setAuthNotice("")}}>Mitarbeiter registrieren</button></div><div className="demo-login"><span>Groß-Admin</span><b>Benutzername: admin</b><b>Passwort: 1234</b></div></>}{authView==="company"&&<><div className="login-copy"><span>FIRMENKONTO</span><h1>Firma registrieren</h1><p>Erstellt eine Firma mit einem eigenen Firmen-Admin.</p></div><form onSubmit={registerCompany}><label>Firmenname<input autoFocus value={companySignup.companyName} onChange={e=>setCompanySignup({...companySignup,companyName:e.target.value})} placeholder="z. B. Yildiz Markt"/></label><label>Name des Firmen-Admins<input value={companySignup.displayName} onChange={e=>setCompanySignup({...companySignup,displayName:e.target.value})} placeholder="Vor- und Nachname"/></label><label>Benutzername<input value={companySignup.username} onChange={e=>setCompanySignup({...companySignup,username:e.target.value})} placeholder="Benutzername"/></label><label>Passwort<input type="password" value={companySignup.password} onChange={e=>setCompanySignup({...companySignup,password:e.target.value})} placeholder="Mindestens 4 Zeichen"/></label>{loginError&&<p className="login-error">{loginError}</p>}<button>Firmenkonto erstellen →</button></form><button className="auth-back-button" onClick={()=>{setAuthView("login");setLoginError("")}}>← Zur Anmeldung</button></>}{authView==="employee"&&<><div className="login-copy"><span>MITARBEITERKONTO</span><h1>Mitarbeiter registrieren</h1><p>Du brauchst den Firmen-Code deines Betriebs.</p></div><form onSubmit={registerEmployee}><label>Firmen-Code<input autoFocus value={employeeSignup.companyCode} onChange={e=>setEmployeeSignup({...employeeSignup,companyCode:e.target.value.toUpperCase()})} placeholder="z. B. STAR-001"/></label><label>Name<input value={employeeSignup.displayName} onChange={e=>setEmployeeSignup({...employeeSignup,displayName:e.target.value})} placeholder="Vor- und Nachname"/></label><label>Benutzername<input value={employeeSignup.username} onChange={e=>setEmployeeSignup({...employeeSignup,username:e.target.value})} placeholder="Benutzername"/></label><label>Passwort<input type="password" value={employeeSignup.password} onChange={e=>setEmployeeSignup({...employeeSignup,password:e.target.value})} placeholder="Mindestens 4 Zeichen"/></label>{loginError&&<p className="login-error">{loginError}</p>}<button>Mitarbeiterkonto erstellen →</button></form><button className="auth-back-button" onClick={()=>{setAuthView("login");setLoginError("")}}>← Zur Anmeldung</button></>}</section></main>;
 
-  if(!storeType)return <main className="store-select-page"><section className="store-select-card"><div className="login-brand"><div className="brand-mark"><span/><span/><span/></div><div><strong>KASSENSPIEL</strong><small>Wähle dein Geschäft</small></div></div><span className="modal-kicker">SPIEL STARTEN</span><h1>Welche Kasse möchtest du öffnen?</h1><p>Jeder Laden hat ein eigenes Sortiment. „Alle“ enthält alle Produkte gemeinsam.</p><div className="store-choice-grid">{availableStoreOptions.map(option=>{const count=option.type==="Alle"?allProducts.length:allProducts.filter(p=>p.storeType===option.type).length;return <button key={option.type} onClick={()=>{setStoreType(option.type);setCategory("Alle");setNotice(`${option.type} geöffnet`)}}><span>{option.icon}</span><strong>{option.type}</strong><small>{option.description}<br/><b>{count} Produkte</b></small></button>})}<button className="create-store-choice" onClick={()=>{const name=window.prompt("Wie soll der neue Laden heißen?","")?.trim();if(!name)return;if(availableStoreOptions.some(s=>s.type.toLowerCase()===name.toLowerCase())){setNotice("Diesen Laden gibt es bereits");return}const next={type:name,icon:"＋",description:"Eigener Laden · startet mit 0 Produkten"};setCustomStores(current=>[...current,next]);setStoreType(name);setCategory("Alle");setNotice(`${name} erstellt · 0 Produkte`)}}><span>＋</span><strong>Neuen Laden erstellen</strong><small>Eigener Laden · startet mit 0 Produkten</small></button></div><button className="store-logout" onClick={logout}>Zurück zur Anmeldung</button></section></main>;
+  if(!storeType)return <main className="store-select-page"><section className="store-select-card"><div className="login-brand"><div className="brand-mark"><span/><span/><span/></div><div><strong>KASSENSPIEL</strong><small>Wähle dein Geschäft</small></div></div><span className="modal-kicker">SPIEL STARTEN</span><h1>Welche Kasse möchtest du öffnen?</h1><p>Jeder Laden hat ein eigenes Sortiment. „Alle“ enthält alle Produkte gemeinsam.</p><div className="store-choice-grid">{availableStoreOptions.map(option=>{const isEvent=option.type==="Event";const count=isEvent?eventScanHistory.length:option.type==="Alle"?allProducts.length:allProducts.filter(p=>p.storeType===option.type).length;return <button key={option.type} onClick={()=>{setStoreType(option.type);setCategory("Alle");setNotice(`${option.type} geöffnet`)}}><span>{option.icon}</span><strong>{option.type}</strong><small>{option.description}<br/><b>{count} {isEvent?"Tickets":"Produkte"}</b></small></button>})}<button className="create-store-choice" onClick={()=>{const name=window.prompt("Wie soll der neue Laden heißen?","")?.trim();if(!name)return;if(availableStoreOptions.some(s=>s.type.toLowerCase()===name.toLowerCase())){setNotice("Diesen Laden gibt es bereits");return}const next={type:name,icon:"＋",description:"Eigener Laden · startet mit 0 Produkten"};setCustomStores(current=>[...current,next]);setStoreType(name);setCategory("Alle");setNotice(`${name} erstellt · 0 Produkte`)}}><span>＋</span><strong>Neuen Laden erstellen</strong><small>Eigener Laden · startet mit 0 Produkten</small></button></div><button className="store-logout" onClick={logout}>Zurück zur Anmeldung</button></section></main>;
+
+  if(storeType==="Event")return <main className="event-store-shell">
+    <header className="topbar event-store-topbar"><div className="brand"><div className="brand-mark"><span/><span/><span/></div><div><strong>KASSENSPIEL</strong><small>Eventkasse · {settings.storeName}</small></div></div><div className="status-pill"><i/>{eventScanStatus||"Eventkasse bereit"}</div><div className="header-actions"><button onClick={()=>setStoreType(null)}>Laden wechseln</button>{canManageAccounts&&<button onClick={()=>{setShowAccountManager(true);setAuthNotice("")}}>👥 Konten</button>}<button onClick={logout}>Abmelden</button></div></header>
+    <section className="event-store-hero">
+      <div><span className="modal-kicker">EVENTKASSE</span><h1>Tickets speichern & am Eingang einlösen</h1><p>Schritt 1: Tickets und Namen vorher speichern. Schritt 2: Beim Einlass erneut scannen. Ein Ticket kann normalerweise nur einmal eingelöst werden.</p></div>
+      <div className="event-store-actions"><button className="save" onClick={()=>openEventScanner("save")}>＋ Tickets speichern</button><button className="redeem" onClick={()=>openEventScanner("redeem")}>✓ Einlass scannen</button></div>
+    </section>
+    <section className="event-store-stats">
+      <article><span>🎫</span><div><small>Gesamt gespeichert</small><strong>{eventScanHistory.length}</strong></div></article>
+      <article><span>🕒</span><div><small>Noch offen</small><strong>{savedEventCount}</strong></div></article>
+      <article><span>✅</span><div><small>Eingelöst</small><strong>{redeemedEventCount}</strong></div></article>
+      <article className={multipleRedeemCount?"warning":""}><span>⚠️</span><div><small>Mehrfach eingelöst</small><strong>{multipleRedeemCount}</strong></div></article>
+    </section>
+    <section className="event-store-list">
+      <div className="event-store-list-head"><div><span className="modal-kicker">TICKETLISTE</span><h2>Gespeicherte Personen & Tickets</h2><p>Auf Handy/iPad nach links wischen oder direkt auf 🗑 drücken, um nur dieses eine Ticket zu löschen.</p></div><div className="event-list-legend"><span className="saved">Gespeichert</span><span className="redeemed">Eingelöst</span></div></div>
+      <div className="event-store-ticket-list">{renderEventRows()}</div>
+    </section>
+    {eventScannerOverlay}
+    {duplicateEventOverlay}
+    {showAccountManager&&<div className="modal-backdrop account-manager-backdrop"><section className="account-manager-modal"><button className="modal-close" onClick={()=>setShowAccountManager(false)}>×</button><span className="modal-kicker">KONTOVERWALTUNG</span><h2>{currentAuthUser?.role==="superadmin"?"Alle Konten":"Mitarbeiterkonten"}</h2><p>{currentAuthUser?.role==="superadmin"?"Groß-Admin verwaltet alle Firmen und Konten.":"Firmen-Admin verwaltet die Mitarbeiter der eigenen Firma."}</p><div className="account-list">{managedUsers.map(user=><article key={user.id}><div><strong>{user.displayName}</strong><small>@{user.username} · {user.role==="superadmin"?"Groß-Admin":user.role==="company_admin"?"Firmen-Admin":"Mitarbeiter"}{user.companyId?` · ${authCompanies.find(c=>c.id===user.companyId)?.name||"Firma"}`:""}</small></div><span className={user.active?"active":"blocked"}>{user.active?"Aktiv":"Gesperrt"}</span>{user.id!=="global-admin"&&<div className="account-actions"><button onClick={()=>resetManagedPassword(user.id)}>Passwort</button><button onClick={()=>toggleManagedAccount(user.id)}>{user.active?"Sperren":"Aktivieren"}</button>{currentAuthUser?.role==="superadmin"&&<button className="danger" onClick={()=>deleteManagedAccount(user.id)}>Löschen</button>}</div>}</article>)}</div></section></div>}
+  </main>;
 
   return <main className="pos-shell">
     <header className="topbar"><div className="brand"><div className="brand-mark"><span/><span/><span/></div><div><strong>KASSENSPIEL</strong><small>{storeType} · {settings.storeName}</small></div></div><div className="status-pill"><i/>{notice}</div><div className="header-actions"><button onClick={()=>setShowHistory(true)}>▤ Bons ({receiptHistory.length})</button><button onClick={()=>{setStoreDraft(settings.storeName);setLogoDraft(settings.logo);setShowSettings(true)}}>⚙ Bon & Laden</button><button onClick={()=>setStoreType(null)}>Laden wechseln</button>{canManageAccounts&&<button onClick={()=>{setShowAccountManager(true);setAuthNotice("")}}>👥 Konten</button>}<button onClick={logout}>Abmelden</button></div></header>
-    <section className="dashboard-strip"><div><span className="metric-icon green">↗</span><p><small>Tagesumsatz</small><strong>{money(sales)}</strong></p></div><div><span className="metric-icon blue">▤</span><p><small>Vorgänge heute</small><strong>{transactions}</strong></p></div><div><span className="metric-icon orange">◷</span><p><small>Aktuelle Uhrzeit</small><strong>{clock}</strong></p></div><div className="dashboard-actions"><button onClick={()=>setShowHistory(true)}>▤ Käufe & Bons</button><button className="event-scanner-button" onClick={()=>setShowEventScanner(true)}>🎫 Event-Scanner</button><button className="coupon-button" onClick={()=>setShowCoupons(true)}>🏷 Angebote & Coupons</button><button className="camera-product-button" onClick={()=>startScanner("new")}>▣ Barcode für Artikel</button><button className="new-product-button" onClick={()=>setShowProduct(true)}>＋ Neuer Artikel</button><button onClick={()=>{setSales(0);setTransactions(0);setNotice("Neuer Kassentag gestartet")}}>↻ Neuer Kassentag</button></div></section>
+    <section className="dashboard-strip"><div><span className="metric-icon green">↗</span><p><small>Tagesumsatz</small><strong>{money(sales)}</strong></p></div><div><span className="metric-icon blue">▤</span><p><small>Vorgänge heute</small><strong>{transactions}</strong></p></div><div><span className="metric-icon orange">◷</span><p><small>Aktuelle Uhrzeit</small><strong>{clock}</strong></p></div><div className="dashboard-actions"><button onClick={()=>setShowHistory(true)}>▤ Käufe & Bons</button><button className="coupon-button" onClick={()=>setShowCoupons(true)}>🏷 Angebote & Coupons</button><button className="camera-product-button" onClick={()=>startScanner("new")}>▣ Barcode für Artikel</button><button className="new-product-button" onClick={()=>setShowProduct(true)}>＋ Neuer Artikel</button><button onClick={()=>{setSales(0);setTransactions(0);setNotice("Neuer Kassentag gestartet")}}>↻ Neuer Kassentag</button></div></section>
     <div className="workspace"><section className="catalog-panel"><div className="scan-row"><label className="search-box"><span>⌕</span><input aria-label="Produkte suchen" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Produkt suchen …"/></label><div className="barcode-controls"><label className="barcode-box"><span>▥</span><input aria-label="Barcode oder Coupon eingeben" value={barcode} onChange={e=>setBarcode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&scan()} placeholder="Barcode oder Coupon-Code"/><button onClick={scan}>Eingeben</button></label><button className="camera-scan-button" onClick={()=>startScanner("mde")} aria-label="MDE Barcode mit Kamera scannen">▣ MDE-SCAN</button></div></div><nav className="categories">{categories.map(c=><button key={c} className={category===c?"active":""} onClick={()=>setCategory(c)}>{c}</button>)}</nav><div className="product-header"><h1>Produkte</h1><span>{visibleProducts.length} Artikel</span><button onClick={()=>setShowProduct(true)}>＋ Artikel erstellen</button></div><div className="product-grid">{visibleProducts.map(p=><button className="product-card" key={p.id} onClick={()=>addProduct(p)}><span className="product-visual" style={{background:p.color}}><span className="product-fallback" aria-hidden="true">{p.icon}</span>{p.image&&<img src={p.image} alt="" onError={e=>{e.currentTarget.style.display="none"}}/>}</span><span className="product-copy"><strong>{p.name}</strong><small>{p.unit} · #{p.barcode}</small><b>{money(p.price)}</b><em className={(p.stock||0)>0?"stock-ok":"stock-out"}>{(p.stock||0)>0?`${p.stock} verfügbar`:"Nicht verfügbar"}</em></span><span className="edit-product-price" role="button" tabIndex={0} title="Preis ändern" onClick={e=>{e.stopPropagation();setEditingProduct(p);setEditPrice(String(p.price).replace(".",","))}} onKeyDown={e=>{if(e.key==="Enter"){e.stopPropagation();setEditingProduct(p);setEditPrice(String(p.price).replace(".",","))}}}>✎</span><span className="add">+</span></button>)}{!visibleProducts.length&&<div className="empty-products">Kein Produkt gefunden.</div>}</div></section>
       <aside className="cart-panel"><div className="cart-title"><div><h2>Aktueller Einkauf</h2><span>{itemCount} Artikel</span></div>{cart.length>0&&<button onClick={()=>setCart([])}>Leeren</button>}</div><div className="cart-list">{cart.length===0?<div className="empty-cart"><div>🛒</div><h3>Noch keine Artikel</h3><p>Wähle links ein Produkt oder gib einen Barcode ein.</p></div>:cart.map(i=><div className="cart-item" key={i.id}><span className="cart-icon" style={{background:i.color}}><span aria-hidden="true">{i.icon}</span>{i.image&&<img src={i.image} alt="" onError={e=>{e.currentTarget.style.display="none"}}/>}</span><div className="cart-name"><strong>{i.name}</strong><small>{money(i.price)} / {i.unit}</small>{measureData(i.baseUnit||i.unit)&&<button className="measure-item-button" onClick={()=>openMeasure(i)}>⚖ Menge/Gewicht eingeben</button>}</div><div className="quantity"><button onClick={()=>changeQuantity(i.id,-1)}>−</button><b>{i.quantity}</b><button onClick={()=>changeQuantity(i.id,1)}>+</button></div><strong className="line-total">{money(i.price*i.quantity)}</strong></div>)}</div><div className="checkout"><div className="summary"><p><span>Zwischensumme</span><strong>{money(subtotal)}</strong></p><p><span>Enthaltene MwSt. (19 %)</span><span>{money(tax)}</span></p></div><div className="grand-total"><span>Gesamt</span><strong>{money(subtotal)}</strong></div><button className="pay-button" disabled={!cart.length} onClick={()=>openPayment("card")}><span>▣</span> Mit Karte zahlen</button><button className="cash-button" disabled={!cart.length} onClick={()=>openPayment("cash")}><span>€</span> Bar bezahlen</button></div></aside></div>
 
@@ -436,7 +667,8 @@ export default function Home(){
 
     {measuringItem&&<div className="modal-backdrop measure-backdrop"><form className="form-modal measure-modal" onSubmit={saveMeasuredAmount}><button type="button" className="modal-close" onClick={()=>setMeasuringItem(null)}>×</button><span className="modal-kicker">WAAGE / MENGENEINGABE</span><h2>{measuringItem.name}</h2><p>Grundpreis: {money(measuringItem.basePrice??measuringItem.price)} für {measuringItem.baseUnit||measuringItem.unit}. Gib die tatsächlich gekaufte Menge ein.</p><div className="measure-step">1. Gewicht oder Menge eintippen</div><div className="measure-input-row"><label>Menge<input autoFocus inputMode="decimal" value={measureAmount} onChange={e=>setMeasureAmount(e.target.value)} placeholder="z. B. 1,5"/></label><label>Einheit<select value={measureUnit} onChange={e=>setMeasureUnit(e.target.value)}>{measureUnits(measureData(measuringItem.baseUnit||measuringItem.unit)?.group).map(unit=><option key={unit}>{unit}</option>)}</select></label></div><div className="measure-live-total"><span>Automatisch berechneter Preis</span><strong>{measurePreview===null?"–":money(measurePreview)}</strong></div><div className="measure-example">Beispiel: Tomaten 500 g für 2,49 € → 1,5 kg kostet automatisch 7,47 €.</div><button className="save-form" disabled={measurePreview===null}>2. Menge übernehmen & Preis speichern</button></form></div>}
 
-    {showEventScanner&&<div className="modal-backdrop event-scanner-backdrop"><section className="event-scanner-modal"><button className="modal-close" onClick={stopEventScanner}>×</button><span className="modal-kicker">EVENT · TICKET · BOARDING PASS</span><h2>Event- & Boarding-Pass-Scanner</h2><p>Dieser Bereich ist komplett getrennt vom Produkt-Barcode-Scanner. Er liest QR-Codes, Boarding-Pässe und normale Barcodes wie EAN, UPC, Code 128/39/93, ITF und Codabar. Jeder Scan wird automatisch im angemeldeten Konto gespeichert.</p><div className="event-camera-view"><video ref={eventVideoRef} playsInline muted/><div className="event-scan-frame"><i/><i/><i/><i/><span/></div><small>⚡ QR-Code oder Barcode kurz in den Rahmen halten</small></div>{eventScannerError&&<p className="scanner-error">{eventScannerError}</p>}{eventScanStatus&&<p className="event-scan-status">{eventScanStatus}</p>}<div className="event-manual-scan"><input value={eventManualCode} onChange={e=>setEventManualCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&acceptEventScan(eventManualCode,"MANUELL")} placeholder="Event-Code / QR-Inhalt manuell eingeben"/><button disabled={!eventManualCode.trim()} onClick={()=>acceptEventScan(eventManualCode,"MANUELL")}>Prüfen</button></div><div className="event-scan-history"><div className="event-history-head"><div><strong>Gespeicherte Scans</strong><small> · wird mit deinem Konto synchronisiert</small></div><button onClick={()=>{setEventScanHistory([]);try{localStorage.removeItem("kassenspiel-v16-event-scans")}catch{};setEventScanStatus("Gespeicherte Event-Scans gelöscht")}}>Leeren</button></div>{eventScanHistory.length===0?<p className="event-empty">Noch kein QR-Code oder Barcode gespeichert.</p>:eventScanHistory.slice(0,12).map(scan=><article key={scan.id} className={scan.kind==="Boarding Pass"?"boarding":""}><span>{scan.kind==="Boarding Pass"?"✈️":"🎫"}</span><div><strong>{scan.kind} · {scan.format}</strong>{scan.passenger&&<small>{scan.passenger}{scan.from||scan.to?` · ${scan.from||"?"} → ${scan.to||"?"}`:""}{scan.flight?` · ${scan.flight}`:""}{scan.seat?` · Sitz ${scan.seat}`:""}</small>}<code>{scan.code}</code><em>{scan.time}</em></div></article>)}</div></section></div>}
+    {eventScannerOverlay}
+    {duplicateEventOverlay}
 
     {scannerMode&&<div className="modal-backdrop scanner-backdrop"><section className="scanner-modal"><button className="modal-close" onClick={stopScanner}>×</button><span className="modal-kicker">AUTOMATISCHER BLITZSCANNER</span><h2>{scannerMode==="coupon"?"Zeitungscoupon scannen":scannerMode==="mde"?"MDE-Produktabfrage":scannerMode==="checkout"?"Produkt scannen":"Barcode für neuen Artikel"}</h2><p>{scannerMode==="coupon"?"Halte den gedruckten Barcode des Kunden in den Rahmen. Der Rabatt wird automatisch übernommen.":scannerMode==="mde"?"Barcode nur in den grünen Rahmen halten. Preis und Lagerbestand erscheinen sofort – ohne Knopfdruck.":scannerMode==="checkout"?"Halte den Produktbarcode ruhig in den grünen Rahmen. Nach dem Bip landet der Artikel im Warenkorb.":"Halte den Barcode in den Rahmen. Danach kannst du Name und Preis festlegen."}</p><div className="camera-view"><video ref={videoRef} playsInline muted/><div className="scan-frame"><i/><i/><i/><i/><span/></div><small>⚡ Automatik aktiv · Barcode vollständig in den Rahmen</small></div>{scannerError&&<p className="scanner-error">{scannerError}</p>}{scanSnapStatus&&<p className="scan-snap-status">{scanSnapStatus}</p>}<div className="scan-help">Kein Knopf nötig: Kamera und zweite Erkennung prüfen fortlaufend jeden Barcode.</div><div className="manual-scan"><label>Oder Code manuell eingeben<input value={barcode} onChange={e=>setBarcode(e.target.value)} placeholder={scannerMode==="coupon"?"Code vom Zeitungscoupon":"Barcode-Nummer"}/></label><button disabled={!barcode.trim()} onClick={()=>acceptScannedBarcode(barcode.trim(),scannerMode)}>Übernehmen & Bip</button></div></section></div>}
 
