@@ -134,3 +134,9 @@ Das Supabase-Projekt „Kassensystem“ war pausiert und wurde wieder gestartet.
 - Einzelne Tickets können direkt gelöscht werden oder auf Handy/iPad durch Wischen nach links.
 - Event-Tickets bleiben im Konto gespeichert und werden über den bestehenden Kontosync zwischen Geräten übertragen.
 - Der vorhandene Produkt-Barcode-Scanner wurde nicht verändert.
+
+
+## V17 Build-Fix
+Vercel-TypeScript-Fehler `Cannot find name 'managedUsers'` behoben.
+Die Eventkasse verwendet jetzt dieselbe vorhandene Kontenliste `visibleManagedUsers`
+wie die normale Kontoverwaltung. Scannerlogik wurde dabei nicht geändert.
