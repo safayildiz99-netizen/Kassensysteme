@@ -105,3 +105,11 @@ The timeout defaults can be overridden for a controlled canary with `SITES_INSTA
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
 - [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+
+
+## V16 Event-Scanner
+Neu hinzugefügt wurde ausschließlich ein separater Bereich „Event-Scanner“ für QR-Code, Aztec, Data Matrix, PDF417, Code 128/39 sowie Boarding-Pässe.
+Der vorhandene Produkt-Barcode-Scanner wurde bytegenau geprüft und NICHT verändert.
+
+Hinweis Login:
+Das Supabase-Projekt „Kassensystem“ war pausiert und wurde wieder gestartet.

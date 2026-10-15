@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserMultiFormatOneDReader, type IScannerControls } from "@zxing/browser";
+import { BrowserMultiFormatReader } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType as ZXingDecodeHintType } from "@zxing/library";
 import * as bwipjs from "bwip-js/browser";
 
@@ -21,6 +22,7 @@ type AuthRole="superadmin"|"company_admin"|"employee";
 type AuthCompany={id:string;name:string;code:string;createdAt:number};
 type AuthUser={id:string;companyId:string|null;username:string;password:string;displayName:string;role:AuthRole;active:boolean;createdAt:number};
 type AccountState={customProducts:Product[];priceOverrides:Record<string,number>;coupons:Coupon[];settings:Settings;sales:number;transactions:number;stocks:Record<string,number>;customStores:CustomStore[];receiptHistory:Receipt[]};
+type EventScanRecord={id:string;code:string;format:string;kind:string;time:string;passenger?:string;from?:string;to?:string;flight?:string;seat?:string};
 type NativeBarcodeDetector={detect:(source:HTMLVideoElement|HTMLCanvasElement)=>Promise<Array<{rawValue:string}>>};
 type NativeBarcodeDetectorConstructor=new(options?:{formats?:string[]})=>NativeBarcodeDetector;
 
@@ -132,6 +134,9 @@ export default function Home(){
   const [showPhotoCamera,setShowPhotoCamera]=useState(false),[photoCameraError,setPhotoCameraError]=useState("");
   const videoRef=useRef<HTMLVideoElement|null>(null),scannerControlsRef=useRef<IScannerControls|null>(null),scanLockRef=useRef(false);
   const productVideoRef=useRef<HTMLVideoElement|null>(null),productStreamRef=useRef<MediaStream|null>(null);
+  const [showEventScanner,setShowEventScanner]=useState(false),[eventScannerError,setEventScannerError]=useState(""),[eventScanStatus,setEventScanStatus]=useState(""),[eventManualCode,setEventManualCode]=useState(""),[eventScanHistory,setEventScanHistory]=useState<EventScanRecord[]>([]);
+  const eventVideoRef=useRef<HTMLVideoElement|null>(null),eventScannerControlsRef=useRef<IScannerControls|null>(null),eventScanLockRef=useRef(false);
+
   const accountSaveTimerRef=useRef<number|null>(null),accountPollTimerRef=useRef<number|null>(null),lastRemoteStateRef=useRef(0),skipNextAccountSaveRef=useRef(false),localAccountSavePendingRef=useRef(false);
 
   const emptyAccountState=():AccountState=>({customProducts:[],priceOverrides:{},coupons:[],settings:{storeName:"Mein Supermarkt",logo:""},sales:0,transactions:0,stocks:{},customStores:[],receiptHistory:[]});
@@ -198,6 +203,113 @@ export default function Home(){
   const chooseAutomaticProductImage=async()=>{const name=newProduct.name.trim();if(!name){setProductError("Bitte zuerst den Artikelnamen eingeben, damit ein passendes Bild gefunden wird.");return}setProductError("");setAutoImageLoading(true);const image=await findProductImageByName(name,newProduct.category);setAutoImageLoading(false);if(!image){setProductError("Zu diesem Namen wurde kein passendes Bild gefunden. Du kannst ein Foto aufnehmen oder hochladen.");return}setNewProduct(current=>({...current,image}));setNotice(`Passendes Bild für ${name} gefunden`)};
   const createProduct=async(e:FormEvent)=>{e.preventDefault();setProductError("");const name=newProduct.name.trim(),barcodeValue=newProduct.barcode.trim(),price=Number(newProduct.price.replace(",",".").replace(/[^0-9.]/g,"")),amount=newProduct.amount.trim().replace(".",","),measure=newProduct.measure.trim();if(!name){setProductError("Bitte einen Artikelnamen eingeben.");return}if(!Number.isFinite(price)||price<=0){setProductError("Bitte einen gültigen Preis eingeben, zum Beispiel 1,49.");return}if(!amount||!/^\d+(?:[,.]\d+)?$/.test(amount)){setProductError("Bitte eine gültige Menge eingeben, zum Beispiel 500 oder 1,5.");return}if(!barcodeValue){setProductError("Bitte einen Barcode scannen oder eingeben.");return}if(allProducts.some(p=>p.barcode===barcodeValue)){setProductError("Dieser Barcode ist bereits bei einem anderen Artikel gespeichert.");return}let productImage=newProduct.image;if(!productImage){setAutoImageLoading(true);productImage=await findProductImageByName(name,newProduct.category);setAutoImageLoading(false)}const product:Product={id:Date.now(),name,price,unit:`${amount} ${measure||"Stück"}`,category:newProduct.category.trim()||"Eigene Artikel",barcode:barcodeValue,icon:newProduct.icon.trim()||"📦",color:"#e7f1ed",image:productImage||undefined,stock:Math.max(0,Number(newProduct.stock.replace(",","."))||0),storeType:storeType||"Alle"};const updated=[...customProducts,product];setCustomProducts(updated);setNewProduct({name:"",price:"",amount:"1",measure:"Stück",category:"Eigene Artikel",barcode:"",icon:"📦",image:"",stock:"25"});setCategory("Eigene Artikel");setSearch("");setShowProduct(false);setNotice(`${name} wurde mit passendem Bild gespeichert`)};
   const loadProductImage=(file?:File)=>{if(!file)return;if(!file.type.startsWith("image/")){setProductError("Bitte ein Produktfoto als JPG, PNG oder HEIC auswählen.");return}setProductError("");const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>{const max=720,scale=Math.min(1,max/Math.max(img.width,img.height)),canvas=document.createElement("canvas");canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));const ctx=canvas.getContext("2d");if(!ctx)return;ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);setNewProduct(p=>({...p,image:canvas.toDataURL("image/jpeg",.78)}))};img.onerror=()=>setProductError("Dieses Bild konnte nicht geladen werden. Bitte ein anderes Foto wählen.");img.src=String(reader.result)};reader.readAsDataURL(file)};
+
+  const eventFormatLabel=(format:string)=>({QR_CODE:"QR-Code",AZTEC:"Aztec",DATA_MATRIX:"Data Matrix",PDF_417:"PDF417",CODE_128:"Code 128",CODE_39:"Code 39",EAN_13:"EAN-13",EAN_8:"EAN-8"}[format]||format||"Barcode");
+  const parseBoardingPass=(code:string)=>{
+    const clean=code.trim();
+    if(!/^M[1-4]/.test(clean)||clean.length<58)return null;
+    const passenger=clean.slice(2,22).trim().replace(/\s*\/\s*/," ");
+    const from=clean.slice(30,33).trim();
+    const to=clean.slice(33,36).trim();
+    const carrier=clean.slice(36,39).trim();
+    const flightNo=clean.slice(39,44).trim();
+    const seat=clean.slice(48,52).trim();
+    return{passenger,from,to,flight:`${carrier}${flightNo}`.trim(),seat};
+  };
+  const rememberEventScan=(record:EventScanRecord)=>setEventScanHistory(current=>{
+    const next=[record,...current].slice(0,100);
+    try{localStorage.setItem("kassenspiel-v16-event-scans",JSON.stringify(next))}catch{}
+    return next;
+  });
+  const acceptEventScan=(raw:string,format="BARCODE")=>{
+    const code=raw.trim();
+    if(!code||eventScanLockRef.current)return;
+    eventScanLockRef.current=true;
+    window.setTimeout(()=>{eventScanLockRef.current=false},650);
+    const boarding=parseBoardingPass(code);
+    const record:EventScanRecord={
+      id:`event-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+      code,
+      format:eventFormatLabel(format),
+      kind:boarding?"Boarding Pass":"Event-Ticket",
+      time:new Date().toLocaleString("de-DE"),
+      ...(boarding||{})
+    };
+    rememberEventScan(record);
+    setEventScanStatus(boarding?`✈ Boarding Pass erkannt${boarding.passenger?` · ${boarding.passenger}`:""}`:`✓ ${eventFormatLabel(format)} erkannt`);
+    setEventManualCode("");
+    beep();
+  };
+  const stopEventScanner=()=>{
+    eventScannerControlsRef.current?.stop();
+    eventScannerControlsRef.current=null;
+    if(eventVideoRef.current?.srcObject){
+      (eventVideoRef.current.srcObject as MediaStream).getTracks().forEach(track=>track.stop());
+      eventVideoRef.current.srcObject=null;
+    }
+    setShowEventScanner(false);
+    setEventScannerError("");
+    setEventScanStatus("");
+  };
+  useEffect(()=>{
+    try{
+      const saved=JSON.parse(localStorage.getItem("kassenspiel-v16-event-scans")||"[]");
+      if(Array.isArray(saved))setEventScanHistory(saved.slice(0,100));
+    }catch{}
+  },[]);
+  useEffect(()=>{
+    if(!showEventScanner||!eventVideoRef.current)return;
+    let cancelled=false;
+    setEventScannerError("");
+    setEventScanStatus("Kamera startet …");
+    eventScanLockRef.current=false;
+    const formats=[
+      BarcodeFormat.QR_CODE,
+      BarcodeFormat.AZTEC,
+      BarcodeFormat.DATA_MATRIX,
+      BarcodeFormat.PDF_417,
+      BarcodeFormat.CODE_128,
+      BarcodeFormat.CODE_39,
+      BarcodeFormat.EAN_13,
+      BarcodeFormat.EAN_8
+    ];
+    const hints=new Map();
+    hints.set(DecodeHintType.TRY_HARDER,true);
+    hints.set(DecodeHintType.ALSO_INVERTED,true);
+    hints.set(DecodeHintType.POSSIBLE_FORMATS,formats);
+    const reader=new BrowserMultiFormatReader(hints,{delayBetweenScanAttempts:12,delayBetweenScanSuccess:110});
+    reader.decodeFromConstraints(
+      {audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:60}}},
+      eventVideoRef.current,
+      (result,_error,controls)=>{
+        eventScannerControlsRef.current=controls;
+        if(result&&!eventScanLockRef.current){
+          const rawFormat=result.getBarcodeFormat();
+          const format=BarcodeFormat[rawFormat]||String(rawFormat);
+          acceptEventScan(result.getText(),format);
+        }
+      }
+    ).then(controls=>{
+      if(cancelled){controls.stop();return}
+      eventScannerControlsRef.current=controls;
+      setEventScanStatus("⚡ Event-Scanner bereit · QR / Boarding Pass / PDF417 / Aztec");
+      const stream=eventVideoRef.current?.srcObject as MediaStream|null;
+      const track=stream?.getVideoTracks()[0];
+      if(track){
+        try{
+          track.applyConstraints({advanced:[{focusMode:"continuous"} as MediaTrackConstraintSet]});
+        }catch{}
+      }
+    }).catch(()=>{
+      if(!cancelled)setEventScannerError("Event-Kamera konnte nicht gestartet werden. Bitte Kamerazugriff erlauben.");
+    });
+    return()=>{
+      cancelled=true;
+      eventScannerControlsRef.current?.stop();
+      eventScannerControlsRef.current=null;
+    };
+  },[showEventScanner]);
+
   const startProductCamera=async()=>{setPhotoCameraError("");try{if(!navigator.mediaDevices?.getUserMedia)throw new Error("camera");const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}}});productStreamRef.current=stream;setShowPhotoCamera(true)}catch{setPhotoCameraError("Die Kamera konnte nicht geöffnet werden. Bitte den Kamerazugriff im Browser erlauben.");setShowPhotoCamera(true)}};
   useEffect(()=>{if(showPhotoCamera&&productVideoRef.current&&productStreamRef.current){productVideoRef.current.srcObject=productStreamRef.current;void productVideoRef.current.play()}},[showPhotoCamera]);
   const stopProductCamera=()=>{productStreamRef.current?.getTracks().forEach(track=>track.stop());productStreamRef.current=null;if(productVideoRef.current)productVideoRef.current.srcObject=null;setShowPhotoCamera(false)};
@@ -213,7 +325,7 @@ export default function Home(){
 
   return <main className="pos-shell">
     <header className="topbar"><div className="brand"><div className="brand-mark"><span/><span/><span/></div><div><strong>KASSENSPIEL</strong><small>{storeType} · {settings.storeName}</small></div></div><div className="status-pill"><i/>{notice}</div><div className="header-actions"><button onClick={()=>setShowHistory(true)}>▤ Bons ({receiptHistory.length})</button><button onClick={()=>{setStoreDraft(settings.storeName);setLogoDraft(settings.logo);setShowSettings(true)}}>⚙ Bon & Laden</button><button onClick={()=>setStoreType(null)}>Laden wechseln</button>{canManageAccounts&&<button onClick={()=>{setShowAccountManager(true);setAuthNotice("")}}>👥 Konten</button>}<button onClick={logout}>Abmelden</button></div></header>
-    <section className="dashboard-strip"><div><span className="metric-icon green">↗</span><p><small>Tagesumsatz</small><strong>{money(sales)}</strong></p></div><div><span className="metric-icon blue">▤</span><p><small>Vorgänge heute</small><strong>{transactions}</strong></p></div><div><span className="metric-icon orange">◷</span><p><small>Aktuelle Uhrzeit</small><strong>{clock}</strong></p></div><div className="dashboard-actions"><button onClick={()=>setShowHistory(true)}>▤ Käufe & Bons</button><button className="coupon-button" onClick={()=>setShowCoupons(true)}>🏷 Angebote & Coupons</button><button className="camera-product-button" onClick={()=>startScanner("new")}>▣ Barcode für Artikel</button><button className="new-product-button" onClick={()=>setShowProduct(true)}>＋ Neuer Artikel</button><button onClick={()=>{setSales(0);setTransactions(0);setNotice("Neuer Kassentag gestartet")}}>↻ Neuer Kassentag</button></div></section>
+    <section className="dashboard-strip"><div><span className="metric-icon green">↗</span><p><small>Tagesumsatz</small><strong>{money(sales)}</strong></p></div><div><span className="metric-icon blue">▤</span><p><small>Vorgänge heute</small><strong>{transactions}</strong></p></div><div><span className="metric-icon orange">◷</span><p><small>Aktuelle Uhrzeit</small><strong>{clock}</strong></p></div><div className="dashboard-actions"><button onClick={()=>setShowHistory(true)}>▤ Käufe & Bons</button><button className="event-scanner-button" onClick={()=>setShowEventScanner(true)}>🎫 Event-Scanner</button><button className="coupon-button" onClick={()=>setShowCoupons(true)}>🏷 Angebote & Coupons</button><button className="camera-product-button" onClick={()=>startScanner("new")}>▣ Barcode für Artikel</button><button className="new-product-button" onClick={()=>setShowProduct(true)}>＋ Neuer Artikel</button><button onClick={()=>{setSales(0);setTransactions(0);setNotice("Neuer Kassentag gestartet")}}>↻ Neuer Kassentag</button></div></section>
     <div className="workspace"><section className="catalog-panel"><div className="scan-row"><label className="search-box"><span>⌕</span><input aria-label="Produkte suchen" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Produkt suchen …"/></label><div className="barcode-controls"><label className="barcode-box"><span>▥</span><input aria-label="Barcode oder Coupon eingeben" value={barcode} onChange={e=>setBarcode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&scan()} placeholder="Barcode oder Coupon-Code"/><button onClick={scan}>Eingeben</button></label><button className="camera-scan-button" onClick={()=>startScanner("mde")} aria-label="MDE Barcode mit Kamera scannen">▣ MDE-SCAN</button></div></div><nav className="categories">{categories.map(c=><button key={c} className={category===c?"active":""} onClick={()=>setCategory(c)}>{c}</button>)}</nav><div className="product-header"><h1>Produkte</h1><span>{visibleProducts.length} Artikel</span><button onClick={()=>setShowProduct(true)}>＋ Artikel erstellen</button></div><div className="product-grid">{visibleProducts.map(p=><button className="product-card" key={p.id} onClick={()=>addProduct(p)}><span className="product-visual" style={{background:p.color}}><span className="product-fallback" aria-hidden="true">{p.icon}</span>{p.image&&<img src={p.image} alt="" onError={e=>{e.currentTarget.style.display="none"}}/>}</span><span className="product-copy"><strong>{p.name}</strong><small>{p.unit} · #{p.barcode}</small><b>{money(p.price)}</b><em className={(p.stock||0)>0?"stock-ok":"stock-out"}>{(p.stock||0)>0?`${p.stock} verfügbar`:"Nicht verfügbar"}</em></span><span className="edit-product-price" role="button" tabIndex={0} title="Preis ändern" onClick={e=>{e.stopPropagation();setEditingProduct(p);setEditPrice(String(p.price).replace(".",","))}} onKeyDown={e=>{if(e.key==="Enter"){e.stopPropagation();setEditingProduct(p);setEditPrice(String(p.price).replace(".",","))}}}>✎</span><span className="add">+</span></button>)}{!visibleProducts.length&&<div className="empty-products">Kein Produkt gefunden.</div>}</div></section>
       <aside className="cart-panel"><div className="cart-title"><div><h2>Aktueller Einkauf</h2><span>{itemCount} Artikel</span></div>{cart.length>0&&<button onClick={()=>setCart([])}>Leeren</button>}</div><div className="cart-list">{cart.length===0?<div className="empty-cart"><div>🛒</div><h3>Noch keine Artikel</h3><p>Wähle links ein Produkt oder gib einen Barcode ein.</p></div>:cart.map(i=><div className="cart-item" key={i.id}><span className="cart-icon" style={{background:i.color}}><span aria-hidden="true">{i.icon}</span>{i.image&&<img src={i.image} alt="" onError={e=>{e.currentTarget.style.display="none"}}/>}</span><div className="cart-name"><strong>{i.name}</strong><small>{money(i.price)} / {i.unit}</small>{measureData(i.baseUnit||i.unit)&&<button className="measure-item-button" onClick={()=>openMeasure(i)}>⚖ Menge/Gewicht eingeben</button>}</div><div className="quantity"><button onClick={()=>changeQuantity(i.id,-1)}>−</button><b>{i.quantity}</b><button onClick={()=>changeQuantity(i.id,1)}>+</button></div><strong className="line-total">{money(i.price*i.quantity)}</strong></div>)}</div><div className="checkout"><div className="summary"><p><span>Zwischensumme</span><strong>{money(subtotal)}</strong></p><p><span>Enthaltene MwSt. (19 %)</span><span>{money(tax)}</span></p></div><div className="grand-total"><span>Gesamt</span><strong>{money(subtotal)}</strong></div><button className="pay-button" disabled={!cart.length} onClick={()=>openPayment("card")}><span>▣</span> Mit Karte zahlen</button><button className="cash-button" disabled={!cart.length} onClick={()=>openPayment("cash")}><span>€</span> Bar bezahlen</button></div></aside></div>
 
@@ -224,6 +336,8 @@ export default function Home(){
     {payment&&<div className="modal-backdrop"><div className="payment-modal"><button className="modal-close" onClick={()=>{setPayment(null);setPaymentAmount("");setPaymentCoupon(null);setPaymentCouponCode("");setCash("")}}>×</button><div className={`payment-symbol ${payment}`}>{payment==="card"?"▣":"€"}</div><p className="eyebrow">{payment==="card"?"Kartenzahlung":"Barzahlung"}</p><div className="payment-total-entry"><label>Zu zahlender Betrag</label><div><input autoFocus inputMode="decimal" value={paymentAmount} onChange={e=>{setPaymentAmount(e.target.value);setPaymentCoupon(null);setPaymentCouponError("")}} placeholder="0,00"/><span>€</span></div><small>Warenkorb ursprünglich: {money(subtotal)} · Betrag kann geändert werden</small></div><div className={`payment-coupon-entry ${paymentCoupon?"applied":""}`}><label>Zeitungscoupon des Kunden einlösen</label><div><input value={paymentCouponCode} onChange={e=>setPaymentCouponCode(e.target.value)} placeholder="Gedruckten Coupon-Code eingeben" disabled={!!paymentCoupon}/><button onClick={activatePaymentCoupon} disabled={!!paymentCoupon||!paymentCouponCode.trim()}>{paymentCoupon?"✓ Eingelöst":"Einlösen"}</button></div><button className="scan-newspaper-coupon" onClick={()=>startScanner("coupon")} disabled={!!paymentCoupon}>▣ Barcode auf dem Zeitungscoupon scannen</button>{paymentCoupon?<small>− {money(paymentCoupon.amount)} · {paymentCoupon.label}</small>:paymentCouponError&&<small className="error">{paymentCouponError}</small>}</div><h2>{money(payableTotal)}</h2>{payment==="card"?<div className="terminal"><span className="waves">)))</span><strong>{money(payableTotal)} – Karte auflegen</strong><small>Simulation – keine echte Zahlung</small></div>:<div className="cash-entry"><label>Vom Kunden gegeben<input inputMode="decimal" value={cash} onChange={e=>setCash(e.target.value)} placeholder="0,00"/><span>€</span></label><div><span>Rückgeld</span><strong>{money(change)}</strong></div><div className="quick-cash">{[5,10,20,50].map(a=><button onClick={()=>setCash(String(a))} key={a}>{a} €</button>)}</div></div>}<button className="complete-button" onClick={completePayment}>Zahlung abschließen & Bon ansehen</button></div></div>}
 
     {measuringItem&&<div className="modal-backdrop measure-backdrop"><form className="form-modal measure-modal" onSubmit={saveMeasuredAmount}><button type="button" className="modal-close" onClick={()=>setMeasuringItem(null)}>×</button><span className="modal-kicker">WAAGE / MENGENEINGABE</span><h2>{measuringItem.name}</h2><p>Grundpreis: {money(measuringItem.basePrice??measuringItem.price)} für {measuringItem.baseUnit||measuringItem.unit}. Gib die tatsächlich gekaufte Menge ein.</p><div className="measure-step">1. Gewicht oder Menge eintippen</div><div className="measure-input-row"><label>Menge<input autoFocus inputMode="decimal" value={measureAmount} onChange={e=>setMeasureAmount(e.target.value)} placeholder="z. B. 1,5"/></label><label>Einheit<select value={measureUnit} onChange={e=>setMeasureUnit(e.target.value)}>{measureUnits(measureData(measuringItem.baseUnit||measuringItem.unit)?.group).map(unit=><option key={unit}>{unit}</option>)}</select></label></div><div className="measure-live-total"><span>Automatisch berechneter Preis</span><strong>{measurePreview===null?"–":money(measurePreview)}</strong></div><div className="measure-example">Beispiel: Tomaten 500 g für 2,49 € → 1,5 kg kostet automatisch 7,47 €.</div><button className="save-form" disabled={measurePreview===null}>2. Menge übernehmen & Preis speichern</button></form></div>}
+
+    {showEventScanner&&<div className="modal-backdrop event-scanner-backdrop"><section className="event-scanner-modal"><button className="modal-close" onClick={stopEventScanner}>×</button><span className="modal-kicker">EVENT · TICKET · BOARDING PASS</span><h2>Event- & Boarding-Pass-Scanner</h2><p>Dieser Bereich ist komplett getrennt vom Produkt-Barcode-Scanner. Er liest QR-Codes, Aztec, Data Matrix, PDF417 sowie normale Event-Barcodes.</p><div className="event-camera-view"><video ref={eventVideoRef} playsInline muted/><div className="event-scan-frame"><i/><i/><i/><i/><span/></div><small>🎫 Ticket vollständig in den Rahmen halten</small></div>{eventScannerError&&<p className="scanner-error">{eventScannerError}</p>}{eventScanStatus&&<p className="event-scan-status">{eventScanStatus}</p>}<div className="event-manual-scan"><input value={eventManualCode} onChange={e=>setEventManualCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&acceptEventScan(eventManualCode,"MANUELL")} placeholder="Event-Code / QR-Inhalt manuell eingeben"/><button disabled={!eventManualCode.trim()} onClick={()=>acceptEventScan(eventManualCode,"MANUELL")}>Prüfen</button></div><div className="event-scan-history"><div className="event-history-head"><strong>Letzte Scans</strong><button onClick={()=>{setEventScanHistory([]);try{localStorage.removeItem("kassenspiel-v16-event-scans")}catch{}}}>Leeren</button></div>{eventScanHistory.length===0?<p className="event-empty">Noch kein Event-Ticket gescannt.</p>:eventScanHistory.slice(0,12).map(scan=><article key={scan.id} className={scan.kind==="Boarding Pass"?"boarding":""}><span>{scan.kind==="Boarding Pass"?"✈️":"🎫"}</span><div><strong>{scan.kind} · {scan.format}</strong>{scan.passenger&&<small>{scan.passenger}{scan.from||scan.to?` · ${scan.from||"?"} → ${scan.to||"?"}`:""}{scan.flight?` · ${scan.flight}`:""}{scan.seat?` · Sitz ${scan.seat}`:""}</small>}<code>{scan.code}</code><em>{scan.time}</em></div></article>)}</div></section></div>}
 
     {scannerMode&&<div className="modal-backdrop scanner-backdrop"><section className="scanner-modal"><button className="modal-close" onClick={stopScanner}>×</button><span className="modal-kicker">AUTOMATISCHER BLITZSCANNER</span><h2>{scannerMode==="coupon"?"Zeitungscoupon scannen":scannerMode==="mde"?"MDE-Produktabfrage":scannerMode==="checkout"?"Produkt scannen":"Barcode für neuen Artikel"}</h2><p>{scannerMode==="coupon"?"Halte den gedruckten Barcode des Kunden in den Rahmen. Der Rabatt wird automatisch übernommen.":scannerMode==="mde"?"Barcode nur in den grünen Rahmen halten. Preis und Lagerbestand erscheinen sofort – ohne Knopfdruck.":scannerMode==="checkout"?"Halte den Produktbarcode ruhig in den grünen Rahmen. Nach dem Bip landet der Artikel im Warenkorb.":"Halte den Barcode in den Rahmen. Danach kannst du Name und Preis festlegen."}</p><div className="camera-view"><video ref={videoRef} playsInline muted/><div className="scan-frame"><i/><i/><i/><i/><span/></div><small>⚡ Automatik aktiv · Barcode vollständig in den Rahmen</small></div>{scannerError&&<p className="scanner-error">{scannerError}</p>}{scanSnapStatus&&<p className="scan-snap-status">{scanSnapStatus}</p>}<div className="scan-help">Kein Knopf nötig: Kamera und zweite Erkennung prüfen fortlaufend jeden Barcode.</div><div className="manual-scan"><label>Oder Code manuell eingeben<input value={barcode} onChange={e=>setBarcode(e.target.value)} placeholder={scannerMode==="coupon"?"Code vom Zeitungscoupon":"Barcode-Nummer"}/></label><button disabled={!barcode.trim()} onClick={()=>acceptScannedBarcode(barcode.trim(),scannerMode)}>Übernehmen & Bip</button></div></section></div>}
 
