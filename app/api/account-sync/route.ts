@@ -7,12 +7,12 @@ type Role="superadmin"|"company_admin"|"employee";
 type DbCompany={id:string;name:string;code:string;created_at:number};
 type DbUser={id:string;company_id:string|null;username:string;password_hash:string;password_salt:string;display_name:string;role:Role;active:boolean;created_at:number};
 
-const URL=(process.env.SUPABASE_URL||"").replace(/\/$/,"");
+const URL="https://sxonakfxfomyepbsuvhi.supabase.co";
 const SERVICE=process.env.SUPABASE_SERVICE_ROLE_KEY||"";
 const SECRET=process.env.APP_SECRET||SERVICE||"kassenspiel-v16";
 
 function reply(status:number,data:unknown){return Response.json(data,{status,headers:{"cache-control":"no-store"}})}
-function needEnv(){if(!URL||!SERVICE)throw new Error("SUPABASE_URL oder SUPABASE_SERVICE_ROLE_KEY fehlt in Vercel.")}
+function needEnv(){if(!SERVICE)throw new Error("SUPABASE_SERVICE_ROLE_KEY fehlt in Vercel.")}
 function normalizeUsername(v:unknown){return String(v||"").trim().toLowerCase()}
 function normalizeCompanyCode(v:unknown){return String(v||"").trim().toUpperCase().replace(/\s+/g,"")}
 function uid(prefix:string){return `${prefix}-${Date.now().toString(36)}-${crypto.randomBytes(5).toString("hex")}`}
