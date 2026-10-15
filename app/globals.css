@@ -144,3 +144,5 @@
   .event-manual-scan{flex-direction:column}
   .event-manual-scan button{min-height:44px}
 }
+
+.event-history-head small{font-size:10px;color:#8594a2;font-weight:600}

@@ -21,8 +21,8 @@ type Coupon={id:number;code:string;label:string;amount:number;active:boolean};
 type AuthRole="superadmin"|"company_admin"|"employee";
 type AuthCompany={id:string;name:string;code:string;createdAt:number};
 type AuthUser={id:string;companyId:string|null;username:string;password:string;displayName:string;role:AuthRole;active:boolean;createdAt:number};
-type AccountState={customProducts:Product[];priceOverrides:Record<string,number>;coupons:Coupon[];settings:Settings;sales:number;transactions:number;stocks:Record<string,number>;customStores:CustomStore[];receiptHistory:Receipt[]};
 type EventScanRecord={id:string;code:string;format:string;kind:string;time:string;passenger?:string;from?:string;to?:string;flight?:string;seat?:string};
+type AccountState={customProducts:Product[];priceOverrides:Record<string,number>;coupons:Coupon[];settings:Settings;sales:number;transactions:number;stocks:Record<string,number>;customStores:CustomStore[];receiptHistory:Receipt[];eventScanHistory:EventScanRecord[]};
 type NativeBarcodeDetector={detect:(source:HTMLVideoElement|HTMLCanvasElement)=>Promise<Array<{rawValue:string}>>};
 type NativeBarcodeDetectorConstructor=new(options?:{formats?:string[]})=>NativeBarcodeDetector;
 
@@ -135,22 +135,22 @@ export default function Home(){
   const videoRef=useRef<HTMLVideoElement|null>(null),scannerControlsRef=useRef<IScannerControls|null>(null),scanLockRef=useRef(false);
   const productVideoRef=useRef<HTMLVideoElement|null>(null),productStreamRef=useRef<MediaStream|null>(null);
   const [showEventScanner,setShowEventScanner]=useState(false),[eventScannerError,setEventScannerError]=useState(""),[eventScanStatus,setEventScanStatus]=useState(""),[eventManualCode,setEventManualCode]=useState(""),[eventScanHistory,setEventScanHistory]=useState<EventScanRecord[]>([]);
-  const eventVideoRef=useRef<HTMLVideoElement|null>(null),eventScannerControlsRef=useRef<IScannerControls|null>(null),eventScanLockRef=useRef(false);
+  const eventVideoRef=useRef<HTMLVideoElement|null>(null),eventScannerControlsRef=useRef<IScannerControls|null>(null),eventScanLockRef=useRef(false),eventNativeDetectorRef=useRef<any>(null),eventNativeFrameRef=useRef<number|null>(null),eventNativeBusyRef=useRef(false),eventLastScanRef=useRef<{code:string;at:number}>({code:"",at:0});
 
   const accountSaveTimerRef=useRef<number|null>(null),accountPollTimerRef=useRef<number|null>(null),lastRemoteStateRef=useRef(0),skipNextAccountSaveRef=useRef(false),localAccountSavePendingRef=useRef(false);
 
-  const emptyAccountState=():AccountState=>({customProducts:[],priceOverrides:{},coupons:[],settings:{storeName:"Mein Supermarkt",logo:""},sales:0,transactions:0,stocks:{},customStores:[],receiptHistory:[]});
-  const readLegacyAccountState=():AccountState=>{try{return{customProducts:JSON.parse(localStorage.getItem("kassenspiel-products")||"[]"),priceOverrides:JSON.parse(localStorage.getItem("kassenspiel-price-overrides")||"{}"),coupons:JSON.parse(localStorage.getItem("kassenspiel-coupons")||"[]"),settings:JSON.parse(localStorage.getItem("kassenspiel-settings")||"null")||{storeName:"Mein Supermarkt",logo:""},sales:Number(localStorage.getItem("kassenspiel-sales")||0),transactions:Number(localStorage.getItem("kassenspiel-transactions")||0),stocks:JSON.parse(localStorage.getItem("kassenspiel-stocks")||"{}"),customStores:JSON.parse(localStorage.getItem("kassenspiel-custom-stores")||"[]"),receiptHistory:JSON.parse(localStorage.getItem("kassenspiel-receipts")||"[]")}}catch{return emptyAccountState()}};
+  const emptyAccountState=():AccountState=>({customProducts:[],priceOverrides:{},coupons:[],settings:{storeName:"Mein Supermarkt",logo:""},sales:0,transactions:0,stocks:{},customStores:[],receiptHistory:[],eventScanHistory:[]});
+  const readLegacyAccountState=():AccountState=>{try{return{customProducts:JSON.parse(localStorage.getItem("kassenspiel-products")||"[]"),priceOverrides:JSON.parse(localStorage.getItem("kassenspiel-price-overrides")||"{}"),coupons:JSON.parse(localStorage.getItem("kassenspiel-coupons")||"[]"),settings:JSON.parse(localStorage.getItem("kassenspiel-settings")||"null")||{storeName:"Mein Supermarkt",logo:""},sales:Number(localStorage.getItem("kassenspiel-sales")||0),transactions:Number(localStorage.getItem("kassenspiel-transactions")||0),stocks:JSON.parse(localStorage.getItem("kassenspiel-stocks")||"{}"),customStores:JSON.parse(localStorage.getItem("kassenspiel-custom-stores")||"[]"),receiptHistory:JSON.parse(localStorage.getItem("kassenspiel-receipts")||"[]"),eventScanHistory:JSON.parse(localStorage.getItem("kassenspiel-v16-event-scans")||"[]")}}catch{return emptyAccountState()}};
   const readLocalAccountState=(userId:string):AccountState|null=>{try{const raw=localStorage.getItem(accountStateKey(userId));return raw?JSON.parse(raw):null}catch{return null}};
   const isLegacyLocalUser=(userId:string)=>{if(userId==="global-admin")return true;try{const users=JSON.parse(localStorage.getItem(AUTH_USERS_KEY)||"[]") as AuthUser[];return Array.isArray(users)&&users.some(u=>u.id===userId)}catch{return false}};
-  const applyAccountState=(data:Partial<AccountState>|null|undefined)=>{const next={...emptyAccountState(),...(data||{})};setCustomProducts(Array.isArray(next.customProducts)?next.customProducts:[]);setPriceOverrides(next.priceOverrides||{});setCoupons(Array.isArray(next.coupons)?next.coupons:[]);setSettings(next.settings||{storeName:"Mein Supermarkt",logo:""});setStoreDraft((next.settings||{storeName:"Mein Supermarkt"}).storeName||"Mein Supermarkt");setLogoDraft((next.settings||{logo:""}).logo||"");setSales(Number(next.sales)||0);setTransactions(Number(next.transactions)||0);setStocks(next.stocks||{});setCustomStores(Array.isArray(next.customStores)?next.customStores:[]);setReceiptHistory(Array.isArray(next.receiptHistory)?next.receiptHistory:[])};
-  const currentAccountState=():AccountState=>({customProducts,priceOverrides,coupons,settings,sales,transactions,stocks,customStores,receiptHistory});
+  const applyAccountState=(data:Partial<AccountState>|null|undefined)=>{const next={...emptyAccountState(),...(data||{})};setCustomProducts(Array.isArray(next.customProducts)?next.customProducts:[]);setPriceOverrides(next.priceOverrides||{});setCoupons(Array.isArray(next.coupons)?next.coupons:[]);setSettings(next.settings||{storeName:"Mein Supermarkt",logo:""});setStoreDraft((next.settings||{storeName:"Mein Supermarkt"}).storeName||"Mein Supermarkt");setLogoDraft((next.settings||{logo:""}).logo||"");setSales(Number(next.sales)||0);setTransactions(Number(next.transactions)||0);setStocks(next.stocks||{});setCustomStores(Array.isArray(next.customStores)?next.customStores:[]);setReceiptHistory(Array.isArray(next.receiptHistory)?next.receiptHistory:[]);setEventScanHistory(Array.isArray(next.eventScanHistory)?next.eventScanHistory:[])};
+  const currentAccountState=():AccountState=>({customProducts,priceOverrides,coupons,settings,sales,transactions,stocks,customStores,receiptHistory,eventScanHistory});
   const applyAuthPayload=(result:any)=>{if(Array.isArray(result.companies))setAuthCompanies(result.companies);if(Array.isArray(result.users))setAuthUsers(result.users)};
   const loadAccountState=async(user:AuthUser)=>{setHydrated(false);localAccountSavePendingRef.current=false;let source:AccountState|null=null;let updatedAt=0;try{const remote=await accountSync("load_state");source=remote.state as AccountState|null;updatedAt=Number(remote.updatedAt)||0}catch{}if(!source){source=readLocalAccountState(user.id)||(isLegacyLocalUser(user.id)?readLegacyAccountState():emptyAccountState());try{const saved=await accountSync("save_state",{state:source});updatedAt=Number(saved.updatedAt)||Date.now()}catch{}}lastRemoteStateRef.current=updatedAt;skipNextAccountSaveRef.current=true;applyAccountState(source);try{localStorage.setItem(accountStateKey(user.id),JSON.stringify(source))}catch{}setHydrated(true)};
 
   useEffect(()=>{let cancelled=false;const init=async()=>{try{const savedCompanies=JSON.parse(localStorage.getItem(AUTH_COMPANIES_KEY)||"[]") as AuthCompany[];let savedUsers=JSON.parse(localStorage.getItem(AUTH_USERS_KEY)||"[]") as AuthUser[];if(!Array.isArray(savedUsers))savedUsers=[];savedUsers=savedUsers.filter(u=>normalizeAuthUsername(u.username)!=="chef"&&u.id!=="global-admin");await accountSync("migrate_legacy",{companies:Array.isArray(savedCompanies)?savedCompanies:[],users:savedUsers});const token=localStorage.getItem(AUTH_SESSION_KEY);if(!token)return;const result=await accountSync("session");if(cancelled)return;applyAuthPayload(result);const user=result.user as AuthUser;saveCurrentAuth(user);await loadAccountState(user);if(!cancelled)setLoggedIn(true)}catch{localStorage.removeItem(AUTH_SESSION_KEY)}};void init();const tick=()=>setClock(new Date().toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}));tick();const timer=setInterval(tick,30000);return()=>{cancelled=true;clearInterval(timer)}},[]);
 
-  useEffect(()=>{if(!hydrated||!currentAuthUser)return;const snapshot=currentAccountState();try{localStorage.setItem(accountStateKey(currentAuthUser.id),JSON.stringify(snapshot))}catch{}if(skipNextAccountSaveRef.current){skipNextAccountSaveRef.current=false;return}localAccountSavePendingRef.current=true;if(accountSaveTimerRef.current)window.clearTimeout(accountSaveTimerRef.current);accountSaveTimerRef.current=window.setTimeout(async()=>{try{const saved=await accountSync("save_state",{state:snapshot});lastRemoteStateRef.current=Number(saved.updatedAt)||Date.now()}catch{}finally{localAccountSavePendingRef.current=false}},350);return()=>{if(accountSaveTimerRef.current)window.clearTimeout(accountSaveTimerRef.current)}},[customProducts,priceOverrides,coupons,settings,sales,transactions,stocks,customStores,receiptHistory,hydrated,currentAuthUser]);
+  useEffect(()=>{if(!hydrated||!currentAuthUser)return;const snapshot=currentAccountState();try{localStorage.setItem(accountStateKey(currentAuthUser.id),JSON.stringify(snapshot))}catch{}if(skipNextAccountSaveRef.current){skipNextAccountSaveRef.current=false;return}localAccountSavePendingRef.current=true;if(accountSaveTimerRef.current)window.clearTimeout(accountSaveTimerRef.current);accountSaveTimerRef.current=window.setTimeout(async()=>{try{const saved=await accountSync("save_state",{state:snapshot});lastRemoteStateRef.current=Number(saved.updatedAt)||Date.now()}catch{}finally{localAccountSavePendingRef.current=false}},350);return()=>{if(accountSaveTimerRef.current)window.clearTimeout(accountSaveTimerRef.current)}},[customProducts,priceOverrides,coupons,settings,sales,transactions,stocks,customStores,receiptHistory,eventScanHistory,hydrated,currentAuthUser]);
 
   useEffect(()=>{if(!loggedIn||!hydrated||!currentAuthUser)return;const poll=async()=>{if(localAccountSavePendingRef.current)return;try{const remote=await accountSync("load_state");const updatedAt=Number(remote.updatedAt)||0;if(remote.state&&updatedAt>lastRemoteStateRef.current){lastRemoteStateRef.current=updatedAt;skipNextAccountSaveRef.current=true;applyAccountState(remote.state as AccountState);try{localStorage.setItem(accountStateKey(currentAuthUser.id),JSON.stringify(remote.state))}catch{}}}catch{}};accountPollTimerRef.current=window.setInterval(()=>void poll(),3000);const onFocus=()=>void poll();window.addEventListener("focus",onFocus);return()=>{if(accountPollTimerRef.current)window.clearInterval(accountPollTimerRef.current);window.removeEventListener("focus",onFocus)}},[loggedIn,hydrated,currentAuthUser]);
 
@@ -204,7 +204,7 @@ export default function Home(){
   const createProduct=async(e:FormEvent)=>{e.preventDefault();setProductError("");const name=newProduct.name.trim(),barcodeValue=newProduct.barcode.trim(),price=Number(newProduct.price.replace(",",".").replace(/[^0-9.]/g,"")),amount=newProduct.amount.trim().replace(".",","),measure=newProduct.measure.trim();if(!name){setProductError("Bitte einen Artikelnamen eingeben.");return}if(!Number.isFinite(price)||price<=0){setProductError("Bitte einen gültigen Preis eingeben, zum Beispiel 1,49.");return}if(!amount||!/^\d+(?:[,.]\d+)?$/.test(amount)){setProductError("Bitte eine gültige Menge eingeben, zum Beispiel 500 oder 1,5.");return}if(!barcodeValue){setProductError("Bitte einen Barcode scannen oder eingeben.");return}if(allProducts.some(p=>p.barcode===barcodeValue)){setProductError("Dieser Barcode ist bereits bei einem anderen Artikel gespeichert.");return}let productImage=newProduct.image;if(!productImage){setAutoImageLoading(true);productImage=await findProductImageByName(name,newProduct.category);setAutoImageLoading(false)}const product:Product={id:Date.now(),name,price,unit:`${amount} ${measure||"Stück"}`,category:newProduct.category.trim()||"Eigene Artikel",barcode:barcodeValue,icon:newProduct.icon.trim()||"📦",color:"#e7f1ed",image:productImage||undefined,stock:Math.max(0,Number(newProduct.stock.replace(",","."))||0),storeType:storeType||"Alle"};const updated=[...customProducts,product];setCustomProducts(updated);setNewProduct({name:"",price:"",amount:"1",measure:"Stück",category:"Eigene Artikel",barcode:"",icon:"📦",image:"",stock:"25"});setCategory("Eigene Artikel");setSearch("");setShowProduct(false);setNotice(`${name} wurde mit passendem Bild gespeichert`)};
   const loadProductImage=(file?:File)=>{if(!file)return;if(!file.type.startsWith("image/")){setProductError("Bitte ein Produktfoto als JPG, PNG oder HEIC auswählen.");return}setProductError("");const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>{const max=720,scale=Math.min(1,max/Math.max(img.width,img.height)),canvas=document.createElement("canvas");canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));const ctx=canvas.getContext("2d");if(!ctx)return;ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);setNewProduct(p=>({...p,image:canvas.toDataURL("image/jpeg",.78)}))};img.onerror=()=>setProductError("Dieses Bild konnte nicht geladen werden. Bitte ein anderes Foto wählen.");img.src=String(reader.result)};reader.readAsDataURL(file)};
 
-  const eventFormatLabel=(format:string)=>({QR_CODE:"QR-Code",AZTEC:"Aztec",DATA_MATRIX:"Data Matrix",PDF_417:"PDF417",CODE_128:"Code 128",CODE_39:"Code 39",EAN_13:"EAN-13",EAN_8:"EAN-8"}[format]||format||"Barcode");
+  const eventFormatLabel=(format:string)=>({QR_CODE:"QR-Code",AZTEC:"Aztec",DATA_MATRIX:"Data Matrix",PDF_417:"PDF417",CODE_128:"Code 128",CODE_39:"Code 39",CODE_93:"Code 93",CODABAR:"Codabar",ITF:"ITF",EAN_13:"EAN-13",EAN_8:"EAN-8",UPC_A:"UPC-A",UPC_E:"UPC-E",qr_code:"QR-Code",aztec:"Aztec",data_matrix:"Data Matrix",pdf417:"PDF417",code_128:"Code 128",code_39:"Code 39",code_93:"Code 93",codabar:"Codabar",itf:"ITF",ean_13:"EAN-13",ean_8:"EAN-8",upc_a:"UPC-A",upc_e:"UPC-E"}[format]||format||"Barcode");
   const parseBoardingPass=(code:string)=>{
     const clean=code.trim();
     if(!/^M[1-4]/.test(clean)||clean.length<58)return null;
@@ -217,15 +217,17 @@ export default function Home(){
     return{passenger,from,to,flight:`${carrier}${flightNo}`.trim(),seat};
   };
   const rememberEventScan=(record:EventScanRecord)=>setEventScanHistory(current=>{
-    const next=[record,...current].slice(0,100);
+    const next=[record,...current].slice(0,200);
     try{localStorage.setItem("kassenspiel-v16-event-scans",JSON.stringify(next))}catch{}
     return next;
   });
   const acceptEventScan=(raw:string,format="BARCODE")=>{
     const code=raw.trim();
-    if(!code||eventScanLockRef.current)return;
-    eventScanLockRef.current=true;
-    window.setTimeout(()=>{eventScanLockRef.current=false},650);
+    if(!code)return;
+    const now=performance.now();
+    const last=eventLastScanRef.current;
+    if(last.code===code&&now-last.at<900)return;
+    eventLastScanRef.current={code,at:now};
     const boarding=parseBoardingPass(code);
     const record:EventScanRecord={
       id:`event-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
@@ -236,13 +238,20 @@ export default function Home(){
       ...(boarding||{})
     };
     rememberEventScan(record);
-    setEventScanStatus(boarding?`✈ Boarding Pass erkannt${boarding.passenger?` · ${boarding.passenger}`:""}`:`✓ ${eventFormatLabel(format)} erkannt`);
+    setEventScanStatus(boarding?`✈ Boarding Pass erkannt & gespeichert${boarding.passenger?` · ${boarding.passenger}`:""}`:`✓ ${eventFormatLabel(format)} erkannt & im Konto gespeichert`);
     setEventManualCode("");
     beep();
   };
   const stopEventScanner=()=>{
     eventScannerControlsRef.current?.stop();
     eventScannerControlsRef.current=null;
+    const video=eventVideoRef.current as any;
+    if(video&&eventNativeFrameRef.current!==null&&typeof video.cancelVideoFrameCallback==="function"){
+      try{video.cancelVideoFrameCallback(eventNativeFrameRef.current)}catch{}
+    }
+    eventNativeFrameRef.current=null;
+    eventNativeDetectorRef.current=null;
+    eventNativeBusyRef.current=false;
     if(eventVideoRef.current?.srcObject){
       (eventVideoRef.current.srcObject as MediaStream).getTracks().forEach(track=>track.stop());
       eventVideoRef.current.srcObject=null;
@@ -252,61 +261,151 @@ export default function Home(){
     setEventScanStatus("");
   };
   useEffect(()=>{
-    try{
-      const saved=JSON.parse(localStorage.getItem("kassenspiel-v16-event-scans")||"[]");
-      if(Array.isArray(saved))setEventScanHistory(saved.slice(0,100));
-    }catch{}
-  },[]);
-  useEffect(()=>{
     if(!showEventScanner||!eventVideoRef.current)return;
     let cancelled=false;
+    const video=eventVideoRef.current;
     setEventScannerError("");
-    setEventScanStatus("Kamera startet …");
+    setEventScanStatus("⚡ Kamera startet …");
     eventScanLockRef.current=false;
-    const formats=[
+    eventLastScanRef.current={code:"",at:0};
+
+    const zxingFormats=[
       BarcodeFormat.QR_CODE,
       BarcodeFormat.AZTEC,
       BarcodeFormat.DATA_MATRIX,
       BarcodeFormat.PDF_417,
       BarcodeFormat.CODE_128,
       BarcodeFormat.CODE_39,
+      BarcodeFormat.CODE_93,
+      BarcodeFormat.CODABAR,
+      BarcodeFormat.ITF,
       BarcodeFormat.EAN_13,
-      BarcodeFormat.EAN_8
+      BarcodeFormat.EAN_8,
+      BarcodeFormat.UPC_A,
+      BarcodeFormat.UPC_E
     ];
-    const hints=new Map();
-    hints.set(DecodeHintType.TRY_HARDER,true);
-    hints.set(DecodeHintType.ALSO_INVERTED,true);
-    hints.set(DecodeHintType.POSSIBLE_FORMATS,formats);
-    const reader=new BrowserMultiFormatReader(hints,{delayBetweenScanAttempts:12,delayBetweenScanSuccess:110});
-    reader.decodeFromConstraints(
-      {audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:60}}},
-      eventVideoRef.current,
-      (result,_error,controls)=>{
-        eventScannerControlsRef.current=controls;
-        if(result&&!eventScanLockRef.current){
-          const rawFormat=result.getBarcodeFormat();
-          const format=BarcodeFormat[rawFormat]||String(rawFormat);
-          acceptEventScan(result.getText(),format);
+
+    const startZXingFallback=()=>{
+      const hints=new Map();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS,zxingFormats);
+      const reader=new BrowserMultiFormatReader(hints,{delayBetweenScanAttempts:5,delayBetweenScanSuccess:55});
+      reader.decodeFromConstraints(
+        {audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:60,min:30}}},
+        video,
+        (result,_error,controls)=>{
+          eventScannerControlsRef.current=controls;
+          if(result){
+            const rawFormat=result.getBarcodeFormat();
+            const format=BarcodeFormat[rawFormat]||String(rawFormat);
+            acceptEventScan(result.getText(),format);
+          }
         }
+      ).then(controls=>{
+        if(cancelled){controls.stop();return}
+        eventScannerControlsRef.current=controls;
+        setEventScanStatus("⚡ Schnellscan aktiv · QR + Boarding Pass + normale Barcodes");
+        const stream=video.srcObject as MediaStream|null;
+        const track=stream?.getVideoTracks()[0];
+        if(track){
+          try{track.applyConstraints({advanced:[{focusMode:"continuous",exposureMode:"continuous"} as MediaTrackConstraintSet]})}catch{}
+        }
+      }).catch(()=>{
+        if(!cancelled)setEventScannerError("Event-Kamera konnte nicht gestartet werden. Bitte Kamerazugriff erlauben.");
+      });
+    };
+
+    const startNative=async()=>{
+      const Detector=(window as any).BarcodeDetector;
+      if(!Detector)return false;
+      try{
+        const wanted=["qr_code","aztec","data_matrix","pdf417","code_128","code_39","code_93","codabar","itf","ean_13","ean_8","upc_a","upc_e"];
+        let supported:string[]=wanted;
+        if(typeof Detector.getSupportedFormats==="function"){
+          const all=await Detector.getSupportedFormats();
+          supported=wanted.filter(x=>all.includes(x));
+        }
+        if(!supported.length)return false;
+
+        const stream=await navigator.mediaDevices.getUserMedia({
+          audio:false,
+          video:{facingMode:{ideal:"environment"},width:{ideal:1280,max:1920},height:{ideal:720,max:1080},frameRate:{ideal:60,min:30}}
+        });
+        if(cancelled){stream.getTracks().forEach(t=>t.stop());return true}
+        video.srcObject=stream;
+        video.muted=true;
+        video.setAttribute("playsinline","");
+        await video.play();
+
+        const track=stream.getVideoTracks()[0];
+        if(track){
+          try{
+            const caps=(track as any).getCapabilities?.()||{};
+            const advanced:any[]=[];
+            if(Array.isArray(caps.focusMode)&&caps.focusMode.includes("continuous"))advanced.push({focusMode:"continuous"});
+            if(Array.isArray(caps.exposureMode)&&caps.exposureMode.includes("continuous"))advanced.push({exposureMode:"continuous"});
+            if(advanced.length)await track.applyConstraints({advanced});
+          }catch{}
+        }
+
+        const detector=new Detector({formats:supported});
+        eventNativeDetectorRef.current=detector;
+        setEventScanStatus("⚡ BLITZSCAN aktiv · Barcode einfach kurz vor die Kamera halten");
+
+        const frame=async()=>{
+          if(cancelled||!eventNativeDetectorRef.current)return;
+          if(!eventNativeBusyRef.current&&video.readyState>=2){
+            eventNativeBusyRef.current=true;
+            try{
+              const results=await eventNativeDetectorRef.current.detect(video);
+              if(results?.length){
+                const hit=results[0];
+                acceptEventScan(String(hit.rawValue||""),String(hit.format||"BARCODE"));
+              }
+            }catch{}
+            eventNativeBusyRef.current=false;
+          }
+          if(cancelled)return;
+          const anyVideo=video as any;
+          if(typeof anyVideo.requestVideoFrameCallback==="function"){
+            eventNativeFrameRef.current=anyVideo.requestVideoFrameCallback(()=>void frame());
+          }else{
+            eventNativeFrameRef.current=window.setTimeout(()=>void frame(),8);
+          }
+        };
+        void frame();
+        return true;
+      }catch{
+        if(video.srcObject){
+          try{(video.srcObject as MediaStream).getTracks().forEach(t=>t.stop())}catch{}
+          video.srcObject=null;
+        }
+        return false;
       }
-    ).then(controls=>{
-      if(cancelled){controls.stop();return}
-      eventScannerControlsRef.current=controls;
-      setEventScanStatus("⚡ Event-Scanner bereit · QR / Boarding Pass / PDF417 / Aztec");
-      const stream=eventVideoRef.current?.srcObject as MediaStream|null;
-      const track=stream?.getVideoTracks()[0];
-      if(track){
-        try{
-          track.applyConstraints({advanced:[{focusMode:"continuous"} as MediaTrackConstraintSet]});
-        }catch{}
-      }
-    }).catch(()=>{
-      if(!cancelled)setEventScannerError("Event-Kamera konnte nicht gestartet werden. Bitte Kamerazugriff erlauben.");
+    };
+
+    void startNative().then(ok=>{
+      if(!ok&&!cancelled)startZXingFallback();
     });
+
     return()=>{
       cancelled=true;
       eventScannerControlsRef.current?.stop();
       eventScannerControlsRef.current=null;
+      const anyVideo=video as any;
+      if(eventNativeFrameRef.current!==null){
+        if(typeof anyVideo.cancelVideoFrameCallback==="function"){
+          try{anyVideo.cancelVideoFrameCallback(eventNativeFrameRef.current)}catch{}
+        }else{
+          window.clearTimeout(eventNativeFrameRef.current);
+        }
+      }
+      eventNativeFrameRef.current=null;
+      eventNativeDetectorRef.current=null;
+      eventNativeBusyRef.current=false;
+      if(video.srcObject){
+        try{(video.srcObject as MediaStream).getTracks().forEach(t=>t.stop())}catch{}
+        video.srcObject=null;
+      }
     };
   },[showEventScanner]);
 
@@ -337,7 +436,7 @@ export default function Home(){
 
     {measuringItem&&<div className="modal-backdrop measure-backdrop"><form className="form-modal measure-modal" onSubmit={saveMeasuredAmount}><button type="button" className="modal-close" onClick={()=>setMeasuringItem(null)}>×</button><span className="modal-kicker">WAAGE / MENGENEINGABE</span><h2>{measuringItem.name}</h2><p>Grundpreis: {money(measuringItem.basePrice??measuringItem.price)} für {measuringItem.baseUnit||measuringItem.unit}. Gib die tatsächlich gekaufte Menge ein.</p><div className="measure-step">1. Gewicht oder Menge eintippen</div><div className="measure-input-row"><label>Menge<input autoFocus inputMode="decimal" value={measureAmount} onChange={e=>setMeasureAmount(e.target.value)} placeholder="z. B. 1,5"/></label><label>Einheit<select value={measureUnit} onChange={e=>setMeasureUnit(e.target.value)}>{measureUnits(measureData(measuringItem.baseUnit||measuringItem.unit)?.group).map(unit=><option key={unit}>{unit}</option>)}</select></label></div><div className="measure-live-total"><span>Automatisch berechneter Preis</span><strong>{measurePreview===null?"–":money(measurePreview)}</strong></div><div className="measure-example">Beispiel: Tomaten 500 g für 2,49 € → 1,5 kg kostet automatisch 7,47 €.</div><button className="save-form" disabled={measurePreview===null}>2. Menge übernehmen & Preis speichern</button></form></div>}
 
-    {showEventScanner&&<div className="modal-backdrop event-scanner-backdrop"><section className="event-scanner-modal"><button className="modal-close" onClick={stopEventScanner}>×</button><span className="modal-kicker">EVENT · TICKET · BOARDING PASS</span><h2>Event- & Boarding-Pass-Scanner</h2><p>Dieser Bereich ist komplett getrennt vom Produkt-Barcode-Scanner. Er liest QR-Codes, Aztec, Data Matrix, PDF417 sowie normale Event-Barcodes.</p><div className="event-camera-view"><video ref={eventVideoRef} playsInline muted/><div className="event-scan-frame"><i/><i/><i/><i/><span/></div><small>🎫 Ticket vollständig in den Rahmen halten</small></div>{eventScannerError&&<p className="scanner-error">{eventScannerError}</p>}{eventScanStatus&&<p className="event-scan-status">{eventScanStatus}</p>}<div className="event-manual-scan"><input value={eventManualCode} onChange={e=>setEventManualCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&acceptEventScan(eventManualCode,"MANUELL")} placeholder="Event-Code / QR-Inhalt manuell eingeben"/><button disabled={!eventManualCode.trim()} onClick={()=>acceptEventScan(eventManualCode,"MANUELL")}>Prüfen</button></div><div className="event-scan-history"><div className="event-history-head"><strong>Letzte Scans</strong><button onClick={()=>{setEventScanHistory([]);try{localStorage.removeItem("kassenspiel-v16-event-scans")}catch{}}}>Leeren</button></div>{eventScanHistory.length===0?<p className="event-empty">Noch kein Event-Ticket gescannt.</p>:eventScanHistory.slice(0,12).map(scan=><article key={scan.id} className={scan.kind==="Boarding Pass"?"boarding":""}><span>{scan.kind==="Boarding Pass"?"✈️":"🎫"}</span><div><strong>{scan.kind} · {scan.format}</strong>{scan.passenger&&<small>{scan.passenger}{scan.from||scan.to?` · ${scan.from||"?"} → ${scan.to||"?"}`:""}{scan.flight?` · ${scan.flight}`:""}{scan.seat?` · Sitz ${scan.seat}`:""}</small>}<code>{scan.code}</code><em>{scan.time}</em></div></article>)}</div></section></div>}
+    {showEventScanner&&<div className="modal-backdrop event-scanner-backdrop"><section className="event-scanner-modal"><button className="modal-close" onClick={stopEventScanner}>×</button><span className="modal-kicker">EVENT · TICKET · BOARDING PASS</span><h2>Event- & Boarding-Pass-Scanner</h2><p>Dieser Bereich ist komplett getrennt vom Produkt-Barcode-Scanner. Er liest QR-Codes, Boarding-Pässe und normale Barcodes wie EAN, UPC, Code 128/39/93, ITF und Codabar. Jeder Scan wird automatisch im angemeldeten Konto gespeichert.</p><div className="event-camera-view"><video ref={eventVideoRef} playsInline muted/><div className="event-scan-frame"><i/><i/><i/><i/><span/></div><small>⚡ QR-Code oder Barcode kurz in den Rahmen halten</small></div>{eventScannerError&&<p className="scanner-error">{eventScannerError}</p>}{eventScanStatus&&<p className="event-scan-status">{eventScanStatus}</p>}<div className="event-manual-scan"><input value={eventManualCode} onChange={e=>setEventManualCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&acceptEventScan(eventManualCode,"MANUELL")} placeholder="Event-Code / QR-Inhalt manuell eingeben"/><button disabled={!eventManualCode.trim()} onClick={()=>acceptEventScan(eventManualCode,"MANUELL")}>Prüfen</button></div><div className="event-scan-history"><div className="event-history-head"><div><strong>Gespeicherte Scans</strong><small> · wird mit deinem Konto synchronisiert</small></div><button onClick={()=>{setEventScanHistory([]);try{localStorage.removeItem("kassenspiel-v16-event-scans")}catch{};setEventScanStatus("Gespeicherte Event-Scans gelöscht")}}>Leeren</button></div>{eventScanHistory.length===0?<p className="event-empty">Noch kein QR-Code oder Barcode gespeichert.</p>:eventScanHistory.slice(0,12).map(scan=><article key={scan.id} className={scan.kind==="Boarding Pass"?"boarding":""}><span>{scan.kind==="Boarding Pass"?"✈️":"🎫"}</span><div><strong>{scan.kind} · {scan.format}</strong>{scan.passenger&&<small>{scan.passenger}{scan.from||scan.to?` · ${scan.from||"?"} → ${scan.to||"?"}`:""}{scan.flight?` · ${scan.flight}`:""}{scan.seat?` · Sitz ${scan.seat}`:""}</small>}<code>{scan.code}</code><em>{scan.time}</em></div></article>)}</div></section></div>}
 
     {scannerMode&&<div className="modal-backdrop scanner-backdrop"><section className="scanner-modal"><button className="modal-close" onClick={stopScanner}>×</button><span className="modal-kicker">AUTOMATISCHER BLITZSCANNER</span><h2>{scannerMode==="coupon"?"Zeitungscoupon scannen":scannerMode==="mde"?"MDE-Produktabfrage":scannerMode==="checkout"?"Produkt scannen":"Barcode für neuen Artikel"}</h2><p>{scannerMode==="coupon"?"Halte den gedruckten Barcode des Kunden in den Rahmen. Der Rabatt wird automatisch übernommen.":scannerMode==="mde"?"Barcode nur in den grünen Rahmen halten. Preis und Lagerbestand erscheinen sofort – ohne Knopfdruck.":scannerMode==="checkout"?"Halte den Produktbarcode ruhig in den grünen Rahmen. Nach dem Bip landet der Artikel im Warenkorb.":"Halte den Barcode in den Rahmen. Danach kannst du Name und Preis festlegen."}</p><div className="camera-view"><video ref={videoRef} playsInline muted/><div className="scan-frame"><i/><i/><i/><i/><span/></div><small>⚡ Automatik aktiv · Barcode vollständig in den Rahmen</small></div>{scannerError&&<p className="scanner-error">{scannerError}</p>}{scanSnapStatus&&<p className="scan-snap-status">{scanSnapStatus}</p>}<div className="scan-help">Kein Knopf nötig: Kamera und zweite Erkennung prüfen fortlaufend jeden Barcode.</div><div className="manual-scan"><label>Oder Code manuell eingeben<input value={barcode} onChange={e=>setBarcode(e.target.value)} placeholder={scannerMode==="coupon"?"Code vom Zeitungscoupon":"Barcode-Nummer"}/></label><button disabled={!barcode.trim()} onClick={()=>acceptScannedBarcode(barcode.trim(),scannerMode)}>Übernehmen & Bip</button></div></section></div>}
 

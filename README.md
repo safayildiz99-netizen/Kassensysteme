@@ -113,3 +113,12 @@ Der vorhandene Produkt-Barcode-Scanner wurde bytegenau geprüft und NICHT verän
 
 Hinweis Login:
 Das Supabase-Projekt „Kassensystem“ war pausiert und wurde wieder gestartet.
+
+
+## Event-Scanner Update
+- Event-Scanner bevorzugt jetzt den nativen Frame-für-Frame BarcodeDetector für deutlich schnellere Scans.
+- Fallback über ZXing bleibt für Geräte ohne nativen Detector.
+- Unterstützt zusätzlich normale Barcodes: EAN-13, EAN-8, UPC-A, UPC-E, Code 128, Code 39, Code 93, ITF, Codabar.
+- QR, Aztec, Data Matrix und PDF417 bleiben enthalten.
+- Event-/Boarding-Pass-Scans werden im angemeldeten Konto gespeichert und über den vorhandenen Account-Sync auf andere Geräte übertragen.
+- Der bestehende Produkt-Barcode-Scanner wurde nicht verändert.
